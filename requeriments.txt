@@ -1,0 +1,23 @@
+# Selenium WebDriver - Framework principal para automatización web
+selenium==4.26.1
+
+# WebDriver Manager - Gestión automática de drivers (Chrome, Firefox, etc.)
+webdriver-manager==4.0.2
+
+# pytest - Framework de testing robusto y fácil de usar
+pytest==8.3.3
+
+# pytest-html - Generación de reportes HTML para las pruebas
+pytest-html==4.1.1
+
+# Requests - Para hacer peticiones HTTP si necesitas validar APIs
+requests==2.32.3
+
+# Pillow - Para manipulación de imágenes y capturas de pantalla
+Pillow==10.4.0
+
+# beautifulsoup4 - Para parsing HTML si necesitas extraer datos
+beautifulsoup4==4.12.3
+
+# python-dotenv - Para manejar variables de entorno
+python-dotenv==1.0.1
