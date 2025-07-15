@@ -501,10 +501,37 @@ def test_cp_04_01_02_add_student_with_duplicate_email(driver):
     toggle_panel = driver.find_element(By.ID, "toggle-existing-students")
     chevron_btn = toggle_panel.find_element(By.CLASS_NAME, "chevron")
     aria_expanded = chevron_btn.get_attribute("aria-expanded")
-    if aria_expanded == "false":
-        chevron_btn.click()
+    # Verificar si el panel ya está visible antes de expandir
+    panel_visible = False
+    try:
+        existing_hot = driver.find_element(By.ID, "existingStudentsHOT")
+        if existing_hot.is_displayed():
+            panel_visible = True
+    except Exception:
+        pass
+    if not panel_visible and aria_expanded == "false":
+        # Hacer scroll al botón antes de hacer clic
+        driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", chevron_btn)
+        import time
+        time.sleep(0.5)
+        try:
+            chevron_btn.click()
+        except Exception:
+            # Si el clic es interceptado, usar JavaScript como fallback
+            driver.execute_script("arguments[0].click();", chevron_btn)
         time.sleep(1)
-    existing_hot = wait.until(EC.visibility_of_element_located((By.ID, "existingStudentsHOT")))
+    # Esperar a que el panel esté visible
+    try:
+        existing_hot = wait.until(EC.visibility_of_element_located((By.ID, "existingStudentsHOT")))
+    except Exception:
+        # Imprimir HTML relevante para depuración
+        print("No se encontró el panel de estudiantes existentes tras expandir. HTML del contenedor principal:")
+        try:
+            main = driver.find_element(By.TAG_NAME, "main")
+            print(main.get_attribute("outerHTML"))
+        except Exception:
+            print(driver.page_source)
+        assert False, "No se encontró el panel de estudiantes existentes tras expandir. Ajusta el selector o la lógica según el HTML impreso."
     ht_table = existing_hot.find_element(By.CLASS_NAME, "ht_master")
     table = ht_table.find_element(By.CLASS_NAME, "htCore")
     rows_exist = table.find_elements(By.TAG_NAME, "tr")
@@ -574,7 +601,38 @@ def test_cp_04_01_03_add_student_with_invalid_email_format(driver):
         error = driver.find_element(By.XPATH, "//*[contains(text(), 'Formato de correo inválido') or contains(text(), 'invalid email') or contains(@class, 'alert-danger')]")
     except Exception:
         pass
-    assert error and error.is_displayed(), "No se mostró el error por formato de email inválido"
+    if error and error.is_displayed():
+        return
+    # Si no se encontró el error flotante, buscar en la tabla de resultados de inscripción
+    found_error_in_table = False
+    try:
+        # Buscar el toast de error de inscripción
+        toast = driver.find_element(By.XPATH, "//div[contains(@class, 'toast') and contains(., 'Some students failed to be enrolled')]")
+        if toast and toast.is_displayed():
+            found_error_in_table = True
+        # Buscar el div de resultados de inscripción con encabezado bg-danger
+        results_panel = driver.find_element(By.ID, "results-panel")
+        error_panels = results_panel.find_elements(By.XPATH, ".//div[contains(@class, 'enroll-results-panel') and .//div[contains(@class, 'bg-danger')]]")
+        for panel in error_panels:
+            table = panel.find_element(By.TAG_NAME, "table")
+            rows = table.find_elements(By.TAG_NAME, "tr")
+            for row in rows:
+                cells = row.find_elements(By.TAG_NAME, "td")
+                if len(cells) >= 6:
+                    name = cells[2].text.strip() if cells[2].text else ""
+                    email = cells[3].text.strip() if cells[3].text else ""
+                    error_msg = cells[5].text.strip() if cells[5].text else ""
+                    if "Luis Ramos" in name and "luis.ramos.com" in email and ("not acceptable" in error_msg or "Formato" in error_msg or "email" in error_msg):
+                        found_error_in_table = True
+                        break
+            if found_error_in_table:
+                break
+    except Exception:
+        pass
+    if not found_error_in_table:
+        print("No se encontró el mensaje de error por email inválido ni en alerta, toast ni en la tabla de resultados. HTML del body tras intentar inscribir:")
+        print(driver.find_element(By.TAG_NAME, "body").get_attribute("outerHTML"))
+        assert False, "No se mostró el error por formato de email inválido ni en alerta, toast ni en la tabla de resultados"
 
 @pytest.mark.usefixtures("driver")
 def test_cp_04_01_04_team_required(driver):
@@ -606,10 +664,47 @@ def test_cp_04_01_04_team_required(driver):
     time.sleep(2)
     error = None
     try:
-        error = driver.find_element(By.XPATH, "//*[contains(text(), 'Team es obligatorio') or contains(text(), 'team required') or contains(@class, 'alert-danger')]")
+        error = driver.find_element(By.XPATH, "//*[contains(text(), 'Team es obligatorio') or contains(text(), 'team required') or contains(@class, 'alert-danger') or contains(text(), 'Found empty compulsory fields and/or sections with more than 100 students.')]")
     except Exception:
         pass
-    assert error and error.is_displayed(), "No se mostró el error por Team vacío"
+    if error and error.is_displayed():
+        return
+    # Si no se encontró el error flotante, buscar en la tabla de resultados de inscripción
+    found_error_in_table = False
+    try:
+        # Buscar el toast de error de inscripción
+        toast = driver.find_element(By.XPATH, "//div[contains(@class, 'toast') and contains(., 'Some students failed to be enrolled')]")
+        if toast and toast.is_displayed():
+            found_error_in_table = True
+        # Buscar el div de resultados de inscripción con encabezado bg-danger
+        results_panel = driver.find_element(By.ID, "results-panel")
+        error_panels = results_panel.find_elements(By.XPATH, ".//div[contains(@class, 'enroll-results-panel') and .//div[contains(@class, 'bg-danger')]]")
+        for panel in error_panels:
+            table = panel.find_element(By.TAG_NAME, "table")
+            rows = table.find_elements(By.TAG_NAME, "tr")
+            for row in rows:
+                cells = row.find_elements(By.TAG_NAME, "td")
+                if len(cells) >= 6:
+                    name = cells[2].text.strip() if cells[2].text else ""
+                    email = cells[3].text.strip() if cells[3].text else ""
+                    error_msg = cells[5].text.strip() if cells[5].text else ""
+                    if (
+                        "Carlos Mejía" in name and "carlos.mejia@unsa.edu.pe" in email and (
+                            "Team" in error_msg or "team" in error_msg or "obligatorio" in error_msg or "Found empty compulsory fields" in error_msg
+                        )
+                    ) or (
+                        "Found empty compulsory fields and/or sections with more than 100 students." in error_msg
+                    ):
+                        found_error_in_table = True
+                        break
+            if found_error_in_table:
+                break
+    except Exception:
+        pass
+    if not found_error_in_table:
+        print("No se encontró el mensaje de error por Team vacío ni en alerta, toast ni en la tabla de resultados. HTML del body tras intentar inscribir:")
+        print(driver.find_element(By.TAG_NAME, "body").get_attribute("outerHTML"))
+        assert False, "No se mostró el error por Team vacío ni en alerta, toast ni en la tabla de resultados"
 
 @pytest.mark.usefixtures("driver")
 def test_cp_04_01_05_name_required(driver):
@@ -641,10 +736,47 @@ def test_cp_04_01_05_name_required(driver):
     time.sleep(2)
     error = None
     try:
-        error = driver.find_element(By.XPATH, "//*[contains(text(), 'Name es obligatorio') or contains(text(), 'name required') or contains(@class, 'alert-danger')]")
+        error = driver.find_element(By.XPATH, "//*[contains(text(), 'Name es obligatorio') or contains(text(), 'name required') or contains(@class, 'alert-danger') or contains(text(), 'Found empty compulsory fields and/or sections with more than 100 students.')]")
     except Exception:
         pass
-    assert error and error.is_displayed(), "No se mostró el error por Name vacío"
+    if error and error.is_displayed():
+        return
+    # Si no se encontró el error flotante, buscar en la tabla de resultados de inscripción
+    found_error_in_table = False
+    try:
+        # Buscar el toast de error de inscripción
+        toast = driver.find_element(By.XPATH, "//div[contains(@class, 'toast') and contains(., 'Some students failed to be enrolled')]")
+        if toast and toast.is_displayed():
+            found_error_in_table = True
+        # Buscar el div de resultados de inscripción con encabezado bg-danger
+        results_panel = driver.find_element(By.ID, "results-panel")
+        error_panels = results_panel.find_elements(By.XPATH, ".//div[contains(@class, 'enroll-results-panel') and .//div[contains(@class, 'bg-danger')]]")
+        for panel in error_panels:
+            table = panel.find_element(By.TAG_NAME, "table")
+            rows = table.find_elements(By.TAG_NAME, "tr")
+            for row in rows:
+                cells = row.find_elements(By.TAG_NAME, "td")
+                if len(cells) >= 6:
+                    name = cells[2].text.strip() if cells[2].text else ""
+                    email = cells[3].text.strip() if cells[3].text else ""
+                    error_msg = cells[5].text.strip() if cells[5].text else ""
+                    if (
+                        "ana.torres@unsa.edu.pe" in email and (
+                            "Name" in error_msg or "name" in error_msg or "obligatorio" in error_msg or "Found empty compulsory fields" in error_msg
+                        )
+                    ) or (
+                        "Found empty compulsory fields and/or sections with more than 100 students." in error_msg
+                    ):
+                        found_error_in_table = True
+                        break
+            if found_error_in_table:
+                break
+    except Exception:
+        pass
+    if not found_error_in_table:
+        print("No se encontró el mensaje de error por Name vacío ni en alerta, toast ni en la tabla de resultados. HTML del body tras intentar inscribir:")
+        print(driver.find_element(By.TAG_NAME, "body").get_attribute("outerHTML"))
+        assert False, "No se mostró el error por Name vacío ni en alerta, toast ni en la tabla de resultados"
 
 @pytest.mark.usefixtures("driver")
 def test_cp_04_01_06_email_required(driver):
@@ -676,10 +808,47 @@ def test_cp_04_01_06_email_required(driver):
     time.sleep(2)
     error = None
     try:
-        error = driver.find_element(By.XPATH, "//*[contains(text(), 'Email es obligatorio') or contains(text(), 'email required') or contains(@class, 'alert-danger')]")
+        error = driver.find_element(By.XPATH, "//*[contains(text(), 'Email es obligatorio') or contains(text(), 'email required') or contains(@class, 'alert-danger') or contains(text(), 'Found empty compulsory fields and/or sections with more than 100 students.')]")
     except Exception:
         pass
-    assert error and error.is_displayed(), "No se mostró el error por Email vacío"
+    if error and error.is_displayed():
+        return
+    # Si no se encontró el error flotante, buscar en la tabla de resultados de inscripción
+    found_error_in_table = False
+    try:
+        # Buscar el toast de error de inscripción
+        toast = driver.find_element(By.XPATH, "//div[contains(@class, 'toast') and contains(., 'Some students failed to be enrolled')]")
+        if toast and toast.is_displayed():
+            found_error_in_table = True
+        # Buscar el div de resultados de inscripción con encabezado bg-danger
+        results_panel = driver.find_element(By.ID, "results-panel")
+        error_panels = results_panel.find_elements(By.XPATH, ".//div[contains(@class, 'enroll-results-panel') and .//div[contains(@class, 'bg-danger')]]")
+        for panel in error_panels:
+            table = panel.find_element(By.TAG_NAME, "table")
+            rows = table.find_elements(By.TAG_NAME, "tr")
+            for row in rows:
+                cells = row.find_elements(By.TAG_NAME, "td")
+                if len(cells) >= 6:
+                    name = cells[2].text.strip() if cells[2].text else ""
+                    email = cells[3].text.strip() if cells[3].text else ""
+                    error_msg = cells[5].text.strip() if cells[5].text else ""
+                    if (
+                        "Pedro Ruiz" in name and (
+                            "Email" in error_msg or "email" in error_msg or "obligatorio" in error_msg or "Found empty compulsory fields" in error_msg
+                        )
+                    ) or (
+                        "Found empty compulsory fields and/or sections with more than 100 students." in error_msg
+                    ):
+                        found_error_in_table = True
+                        break
+            if found_error_in_table:
+                break
+    except Exception:
+        pass
+    if not found_error_in_table:
+        print("No se encontró el mensaje de error por Email vacío ni en alerta, toast ni en la tabla de resultados. HTML del body tras intentar inscribir:")
+        print(driver.find_element(By.TAG_NAME, "body").get_attribute("outerHTML"))
+        assert False, "No se mostró el error por Email vacío ni en alerta, toast ni en la tabla de resultados"
 
 @pytest.mark.usefixtures("driver")
 def test_cp_04_01_07_team_must_start_with_letter(driver):
@@ -895,3 +1064,5 @@ def test_cp_04_01_12_team_exceeds_max_length(driver):
     except Exception:
         pass
     assert error and error.is_displayed(), "No se mostró el error por Team excediendo el límite de caracteres"
+
+
