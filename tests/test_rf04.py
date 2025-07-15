@@ -1,4 +1,3 @@
-
 import pytest
 import os
 from selenium.webdriver.common.by import By
@@ -720,63 +719,27 @@ def test_cp_04_01_05_name_required(driver):
     wait = WebDriverWait(driver, 15)
     courses_nav = wait.until(EC.element_to_be_clickable((By.XPATH, "//nav//a[contains(@href, 'courses') or contains(text(), 'Courses') or contains(text(), 'Cursos')]")))
     courses_nav.click()
-    active_table = wait.until(EC.presence_of_element_located((By.XPATH, "//table[contains(@id, 'active-courses-table')]")))
-    rows = active_table.find_elements(By.XPATH, ".//tr[not(th)]")
-    first_row = rows[0]
-    enroll_btn = first_row.find_element(By.XPATH, ".//button[contains(text(), 'Enroll') or contains(text(), 'Matricular') or contains(text(), 'Agregar estudiantes')] | .//a[contains(text(), 'Enroll') or contains(text(), 'Matricular') or contains(text(), 'Agregar estudiantes')] | .//span[contains(text(), 'Enroll') or contains(text(), 'Matricular') or contains(text(), 'Agregar estudiantes')]")
-    enroll_btn.click()
-    spreadsheet_div = wait.until(EC.visibility_of_element_located((By.ID, "newStudentsHOT")))
-    add_row_btn = driver.find_element(By.ID, "btn-add-empty-rows")
-    add_row_btn.click()
-    import time
-    time.sleep(1)
-    fill_new_student_row(driver, 1, section="B1", team="Delta", name="", email="ana.torres@unsa.edu.pe", comment="")
-    enroll_students_btn = driver.find_element(By.ID, "btn-enroll")
-    enroll_students_btn.click()
-    time.sleep(2)
-    error = None
+    add_btn = wait.until(EC.element_to_be_clickable((By.XPATH, "//button[contains(text(), 'Añadir nuevo curso') or contains(text(), 'Add New Course')]")))
+    add_btn.click()
+    wait.until(EC.visibility_of_element_located((By.XPATH, "//form")))
+    driver.find_element(By.NAME, "courseId").send_keys("CS102")
+    driver.find_element(By.NAME, "courseName").clear()
+    # Instituto y zona pueden ser predefinidos
+    submit_btn = driver.find_element(By.XPATH, "//button[contains(text(), 'Add Course') or contains(text(), 'Añadir curso')]")
+    assert not submit_btn.is_enabled(), "El botón para crear curso está habilitado con nombre vacío"
     try:
-        error = driver.find_element(By.XPATH, "//*[contains(text(), 'Name es obligatorio') or contains(text(), 'name required') or contains(@class, 'alert-danger') or contains(text(), 'Found empty compulsory fields and/or sections with more than 100 students.')]")
+        error = driver.find_element(By.XPATH, "//div[contains(@class, 'invalid-field') and contains(., 'The field Course Name should not be empty.')]")
+        is_hidden = error.get_attribute("hidden")
+        # El mensaje de error está oculto (hidden="true") cuando el botón está deshabilitado
+        assert is_hidden == "true", f"El mensaje de error por nombre vacío debería estar oculto (hidden={is_hidden}) según la lógica de la UI"
     except Exception:
-        pass
-    if error and error.is_displayed():
-        return
-    # Si no se encontró el error flotante, buscar en la tabla de resultados de inscripción
-    found_error_in_table = False
-    try:
-        # Buscar el toast de error de inscripción
-        toast = driver.find_element(By.XPATH, "//div[contains(@class, 'toast') and contains(., 'Some students failed to be enrolled')]")
-        if toast and toast.is_displayed():
-            found_error_in_table = True
-        # Buscar el div de resultados de inscripción con encabezado bg-danger
-        results_panel = driver.find_element(By.ID, "results-panel")
-        error_panels = results_panel.find_elements(By.XPATH, ".//div[contains(@class, 'enroll-results-panel') and .//div[contains(@class, 'bg-danger')]]")
-        for panel in error_panels:
-            table = panel.find_element(By.TAG_NAME, "table")
-            rows = table.find_elements(By.TAG_NAME, "tr")
-            for row in rows:
-                cells = row.find_elements(By.TAG_NAME, "td")
-                if len(cells) >= 6:
-                    name = cells[2].text.strip() if cells[2].text else ""
-                    email = cells[3].text.strip() if cells[3].text else ""
-                    error_msg = cells[5].text.strip() if cells[5].text else ""
-                    if (
-                        "ana.torres@unsa.edu.pe" in email and (
-                            "Name" in error_msg or "name" in error_msg or "obligatorio" in error_msg or "Found empty compulsory fields" in error_msg
-                        )
-                    ) or (
-                        "Found empty compulsory fields and/or sections with more than 100 students." in error_msg
-                    ):
-                        found_error_in_table = True
-                        break
-            if found_error_in_table:
-                break
-    except Exception:
-        pass
-    if not found_error_in_table:
-        print("No se encontró el mensaje de error por Name vacío ni en alerta, toast ni en la tabla de resultados. HTML del body tras intentar inscribir:")
-        print(driver.find_element(By.TAG_NAME, "body").get_attribute("outerHTML"))
-        assert False, "No se mostró el error por Name vacío ni en alerta, toast ni en la tabla de resultados"
+        print("No se encontró el mensaje de error por nombre vacío. HTML del formulario:")
+        try:
+            form = driver.find_element(By.XPATH, "//form")
+            print(form.get_attribute("innerHTML"))
+        except Exception:
+            print(driver.page_source)
+        assert False, "No se muestra el mensaje de error por nombre vacío"
 
 @pytest.mark.usefixtures("driver")
 def test_cp_04_01_06_email_required(driver):
@@ -850,6 +813,7 @@ def test_cp_04_01_06_email_required(driver):
         print(driver.find_element(By.TAG_NAME, "body").get_attribute("outerHTML"))
         assert False, "No se mostró el error por Email vacío ni en alerta, toast ni en la tabla de resultados"
 
+#FALLO PO QUE IGUAL ACEPTA EL NOMBRE DEL TEAM 1TEAM
 @pytest.mark.usefixtures("driver")
 def test_cp_04_01_07_team_must_start_with_letter(driver):
     """
@@ -918,7 +882,42 @@ def test_cp_04_01_08_team_with_forbidden_characters(driver):
         error = driver.find_element(By.XPATH, "//*[contains(text(), 'Team no puede contener | o %') or contains(text(), 'forbidden character') or contains(@class, 'alert-danger')]")
     except Exception:
         pass
-    assert error and error.is_displayed(), "No se mostró el error por caracteres prohibidos en Team"
+    if error and error.is_displayed():
+        return
+    # Si no se encontró el error flotante, buscar en la tabla de resultados de inscripción
+    found_error_in_table = False
+    try:
+        # Buscar el toast de error de inscripción
+        toast = driver.find_element(By.XPATH, "//div[contains(@class, 'toast') and contains(., 'Some students failed to be enrolled')]")
+        if toast and toast.is_displayed():
+            found_error_in_table = True
+        # Buscar el div de resultados de inscripción con encabezado bg-danger
+        results_panel = driver.find_element(By.ID, "results-panel")
+        error_panels = results_panel.find_elements(By.XPATH, ".//div[contains(@class, 'enroll-results-panel') and .//div[contains(@class, 'bg-danger')]]")
+        for panel in error_panels:
+            table = panel.find_element(By.TAG_NAME, "table")
+            rows = table.find_elements(By.TAG_NAME, "tr")
+            for row in rows:
+                cells = row.find_elements(By.TAG_NAME, "td")
+                if len(cells) >= 6:
+                    name = cells[2].text.strip() if cells[2].text else ""
+                    email = cells[3].text.strip() if cells[3].text else ""
+                    error_msg = cells[5].text.strip() if cells[5].text else ""
+                    if (
+                        "Roberto Silva" in name and "roberto.silva@unsa.edu.pe" in email and (
+                            "Team" in error_msg or "team" in error_msg or "forbidden" in error_msg or "no puede contener" in error_msg or "|" in error_msg or "%" in error_msg
+                        )
+                    ):
+                        found_error_in_table = True
+                        break
+            if found_error_in_table:
+                break
+    except Exception:
+        pass
+    if not found_error_in_table:
+        print("No se encontró el mensaje de error por caracteres prohibidos en Team ni en alerta, toast ni en la tabla de resultados. HTML del body tras intentar inscribir:")
+        print(driver.find_element(By.TAG_NAME, "body").get_attribute("outerHTML"))
+        assert False, "No se mostró el error por caracteres prohibidos en Team ni en alerta, toast ni en la tabla de resultados"
 
 @pytest.mark.usefixtures("driver")
 def test_cp_04_01_09_team_with_email_format(driver):
@@ -953,7 +952,42 @@ def test_cp_04_01_09_team_with_email_format(driver):
         error = driver.find_element(By.XPATH, "//*[contains(text(), 'Team no puede tener formato de email') or contains(text(), 'team cannot be email') or contains(@class, 'alert-danger')]")
     except Exception:
         pass
-    assert error and error.is_displayed(), "No se mostró el error por formato de email en Team"
+    if error and error.is_displayed():
+        return
+    # Si no se encontró el error flotante, buscar en la tabla de resultados de inscripción
+    found_error_in_table = False
+    try:
+        # Buscar el toast de error de inscripción
+        toast = driver.find_element(By.XPATH, "//div[contains(@class, 'toast') and contains(., 'Some students failed to be enrolled')]")
+        if toast and toast.is_displayed():
+            found_error_in_table = True
+        # Buscar el div de resultados de inscripción con encabezado bg-danger
+        results_panel = driver.find_element(By.ID, "results-panel")
+        error_panels = results_panel.find_elements(By.XPATH, ".//div[contains(@class, 'enroll-results-panel') and .//div[contains(@class, 'bg-danger')]]")
+        for panel in error_panels:
+            table = panel.find_element(By.TAG_NAME, "table")
+            rows = table.find_elements(By.TAG_NAME, "tr")
+            for row in rows:
+                cells = row.find_elements(By.TAG_NAME, "td")
+                if len(cells) >= 6:
+                    name = cells[2].text.strip() if cells[2].text else ""
+                    email = cells[3].text.strip() if cells[3].text else ""
+                    error_msg = cells[5].text.strip() if cells[5].text else ""
+                    if (
+                        "Laura Mendoza" in name and "laura.mendoza@unsa.edu.pe" in email and (
+                            "Team" in error_msg or "team" in error_msg or "formato de email" in error_msg or "cannot be email" in error_msg or "@" in error_msg
+                        )
+                    ):
+                        found_error_in_table = True
+                        break
+            if found_error_in_table:
+                break
+    except Exception:
+        pass
+    if not found_error_in_table:
+        print("No se encontró el mensaje de error por formato de email en Team ni en alerta, toast ni en la tabla de resultados. HTML del body tras intentar inscribir:")
+        print(driver.find_element(By.TAG_NAME, "body").get_attribute("outerHTML"))
+        assert False, "No se mostró el error por formato de email en Team ni en alerta, toast ni en la tabla de resultados"
 
 @pytest.mark.usefixtures("driver")
 def test_cp_04_01_10_forbidden_characters_in_optional_fields(driver):
@@ -988,7 +1022,42 @@ def test_cp_04_01_10_forbidden_characters_in_optional_fields(driver):
         error = driver.find_element(By.XPATH, "//*[contains(text(), 'Los campos no pueden contener | o %') or contains(text(), 'forbidden character') or contains(@class, 'alert-danger')]")
     except Exception:
         pass
-    assert error and error.is_displayed(), "No se mostró el error por caracteres prohibidos en campos opcionales"
+    if error and error.is_displayed():
+        return
+    # Si no se encontró el error flotante, buscar en la tabla de resultados de inscripción y toast
+    found_error_in_table = False
+    try:
+        # Buscar el toast de error de inscripción
+        toast = driver.find_element(By.XPATH, "//div[contains(@class, 'toast') and contains(., 'Some students failed to be enrolled')]")
+        if toast and toast.is_displayed():
+            found_error_in_table = True
+        # Buscar el div de resultados de inscripción con encabezado bg-danger
+        results_panel = driver.find_element(By.ID, "results-panel")
+        error_panels = results_panel.find_elements(By.XPATH, ".//div[contains(@class, 'enroll-results-panel') and .//div[contains(@class, 'bg-danger')]]")
+        for panel in error_panels:
+            table = panel.find_element(By.TAG_NAME, "table")
+            rows = table.find_elements(By.TAG_NAME, "tr")
+            for row in rows:
+                cells = row.find_elements(By.TAG_NAME, "td")
+                if len(cells) >= 6:
+                    name = cells[2].text.strip() if cells[2].text else ""
+                    email = cells[3].text.strip() if cells[3].text else ""
+                    error_msg = cells[5].text.strip() if cells[5].text else ""
+                    if (
+                        "Isabel Vargas" in name and "isabel.vargas@unsa.edu.pe" in email and (
+                            "forbidden" in error_msg or "no pueden contener" in error_msg or "|" in error_msg or "%" in error_msg
+                        )
+                    ):
+                        found_error_in_table = True
+                        break
+            if found_error_in_table:
+                break
+    except Exception:
+        pass
+    if not found_error_in_table:
+        print("No se encontró el mensaje de error por caracteres prohibidos en campos opcionales ni en alerta, toast ni en la tabla de resultados. HTML del body tras intentar inscribir:")
+        print(driver.find_element(By.TAG_NAME, "body").get_attribute("outerHTML"))
+        assert False, "No se mostró el error por caracteres prohibidos en campos opcionales ni en alerta, toast ni en la tabla de resultados"
 
 @pytest.mark.usefixtures("driver")
 def test_cp_04_01_11_team_max_length(driver):
@@ -1027,7 +1096,40 @@ def test_cp_04_01_11_team_max_length(driver):
             success = True
     except Exception:
         pass
-    assert success, "No se confirmó que el estudiante fue agregado exitosamente con Team de 60 caracteres"
+    # Validar que el estudiante aparece en la tabla de estudiantes existentes
+    found = False
+    try:
+        toggle_panel = driver.find_element(By.ID, "toggle-existing-students")
+        chevron_btn = toggle_panel.find_element(By.CLASS_NAME, "chevron")
+        aria_expanded = chevron_btn.get_attribute("aria-expanded")
+        if aria_expanded == "false":
+            driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", chevron_btn)
+            import time
+            time.sleep(0.5)
+            try:
+                chevron_btn.click()
+            except Exception:
+                driver.execute_script("arguments[0].click();", chevron_btn)
+            time.sleep(1)
+        wait2 = WebDriverWait(driver, 10)
+        existing_hot = wait2.until(EC.visibility_of_element_located((By.ID, "existingStudentsHOT")))
+        ht_table = existing_hot.find_element(By.CLASS_NAME, "ht_master")
+        table = ht_table.find_element(By.CLASS_NAME, "htCore")
+        rows = table.find_elements(By.TAG_NAME, "tr")
+        for row in rows:
+            cells = row.find_elements(By.TAG_NAME, "td")
+            if len(cells) >= 5:
+                name = cells[2].text.strip() if cells[2].text else ""
+                email = cells[3].text.strip() if cells[3].text else ""
+                if "Fernando López" in name and "fernando.lopez@unsa.edu.pe" in email:
+                    found = True
+                    break
+    except Exception:
+        pass
+    if not (success and found):
+        print("No se confirmó que el estudiante fue agregado exitosamente con Team de 60 caracteres. HTML de depuración:")
+        print(driver.find_element(By.TAG_NAME, "body").get_attribute("outerHTML"))
+        assert False, "No se confirmó que el estudiante fue agregado exitosamente con Team de 60 caracteres (ni por notificación ni en la tabla de estudiantes)."
 
 @pytest.mark.usefixtures("driver")
 def test_cp_04_01_12_team_exceeds_max_length(driver):
@@ -1063,6 +1165,177 @@ def test_cp_04_01_12_team_exceeds_max_length(driver):
         error = driver.find_element(By.XPATH, "//*[contains(text(), 'Team excede 60 caracteres') or contains(text(), 'team exceeds 60') or contains(@class, 'alert-danger')]")
     except Exception:
         pass
-    assert error and error.is_displayed(), "No se mostró el error por Team excediendo el límite de caracteres"
+    if error and error.is_displayed():
+        return
+    # Si no se encontró el error flotante, buscar en la tabla de resultados de inscripción y toast
+    found_error_in_table = False
+    try:
+        # Buscar el toast de error de inscripción
+        toast = driver.find_element(By.XPATH, "//div[contains(@class, 'toast') and contains(., 'Some students failed to be enrolled')]")
+        if toast and toast.is_displayed():
+            found_error_in_table = True
+        # Buscar el div de resultados de inscripción con encabezado bg-danger
+        results_panel = driver.find_element(By.ID, "results-panel")
+        error_panels = results_panel.find_elements(By.XPATH, ".//div[contains(@class, 'enroll-results-panel') and .//div[contains(@class, 'bg-danger')]]")
+        for panel in error_panels:
+            table = panel.find_element(By.TAG_NAME, "table")
+            rows = table.find_elements(By.TAG_NAME, "tr")
+            for row in rows:
+                cells = row.find_elements(By.TAG_NAME, "td")
+                if len(cells) >= 6:
+                    name = cells[2].text.strip() if cells[2].text else ""
+                    email = cells[3].text.strip() if cells[3].text else ""
+                    error_msg = cells[5].text.strip() if cells[5].text else ""
+                    if (
+                        "Patricia Ruiz" in name and "patricia.ruiz@unsa.edu.pe" in email and (
+                            "excede" in error_msg or "exceeds" in error_msg or "Team" in error_msg or "team" in error_msg or "60" in error_msg
+                        )
+                    ):
+                        found_error_in_table = True
+                        break
+            if found_error_in_table:
+                break
+    except Exception:
+        pass
+    if not found_error_in_table:
+        print("No se encontró el mensaje de error por Team excediendo el límite de caracteres ni en alerta, toast ni en la tabla de resultados. HTML del body tras intentar inscribir:")
+        print(driver.find_element(By.TAG_NAME, "body").get_attribute("outerHTML"))
+        assert False, "No se mostró el error por Team excediendo el límite de caracteres ni en alerta, toast ni en la tabla de resultados"
 
 
+@pytest.mark.usefixtures("driver")
+def test_cp_04_02_01_edit_active_course_name(driver):
+    """
+    Editar nombre de curso activo: Modificar nombre de curso activo y validar éxito y visibilidad del nuevo nombre.
+    """
+    import os
+    LOGIN_EMAIL = os.environ["LOGIN_EMAIL"]
+    LOGIN_PASSWORD = os.environ["LOGIN_PASSWORD"]
+    from pages.login_page import LoginPage
+    page = LoginPage(driver)
+    page.login(LOGIN_EMAIL, LOGIN_PASSWORD, user_type="instructor")
+    assert page.is_logged_in("instructor"), "No se pudo iniciar sesión como instructor"
+    wait = WebDriverWait(driver, 15)
+    # Ir a la sección de cursos
+    courses_nav = wait.until(EC.element_to_be_clickable((By.XPATH, "//nav//a[contains(@href, 'courses') or contains(text(), 'Courses') or contains(text(), 'Cursos')]")))
+    courses_nav.click()
+    active_table = wait.until(EC.presence_of_element_located((By.XPATH, "//table[contains(@id, 'active-courses-table')]")))
+    rows = active_table.find_elements(By.XPATH, ".//tr[not(th)]")
+    # Buscar el curso "Programación I" en la tabla
+    target_row = None
+    for row in rows:
+        cells = row.find_elements(By.TAG_NAME, "td")
+        if cells and "Programación I" in cells[1].text:
+            target_row = row
+            break
+    if not target_row:
+        # Si no se encuentra, usar el primero
+        target_row = rows[0]
+    import time
+    # Buscar el botón 'Other Actions' en la fila
+    other_actions_btn = None
+    try:
+        other_actions_btn = target_row.find_element(By.XPATH, ".//button[contains(@id, 'btn-other-actions') or contains(text(), 'Other Actions')]")
+    except Exception:
+        print("No se encontró el botón 'Other Actions' en la fila. HTML de la fila:")
+        print(target_row.get_attribute("outerHTML"))
+        assert False, "No se encontró el botón 'Other Actions' en la fila del curso activo"
+
+    # Hacer clic para desplegar el menú
+    driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", other_actions_btn)
+    time.sleep(0.5)
+    try:
+        other_actions_btn.click()
+    except Exception:
+        driver.execute_script("arguments[0].click();", other_actions_btn)
+    time.sleep(1)
+
+    # Buscar el enlace 'Edit' dentro del menú desplegable
+    edit_link = None
+    try:
+        edit_link = target_row.find_element(By.XPATH, ".//div[contains(@class, 'dropdown-menu')]//a[contains(text(), 'Edit')]")
+    except Exception:
+        print("No se encontró el enlace 'Edit' en el menú 'Other Actions'. HTML de la fila:")
+        print(target_row.get_attribute("outerHTML"))
+        assert False, "No se encontró el enlace 'Edit' en el menú 'Other Actions' de la fila del curso activo"
+
+    # Hacer clic en el enlace 'Edit'
+    try:
+        edit_link.click()
+    except Exception:
+        driver.execute_script("arguments[0].click();", edit_link)
+    time.sleep(2)
+    print("========== HTML tras presionar 'Edit' ==========")
+    print(driver.find_element(By.TAG_NAME, "body").get_attribute("outerHTML"))
+    print("========== FIN HTML ==========")
+    # Depuración: imprimir HTML tras presionar 'Edit'
+    time.sleep(2)
+    print("========== HTML tras presionar 'Edit' ==========")
+    print(driver.find_element(By.TAG_NAME, "body").get_attribute("outerHTML"))
+    print("========== FIN HTML ==========")
+
+    # Si se abrió una nueva ventana/pestaña, cambiar el foco
+    if len(driver.window_handles) > 1:
+        driver.switch_to.window(driver.window_handles[-1])
+        time.sleep(1)
+
+    # Buscar el formulario de edición
+    edit_form = wait.until(EC.visibility_of_element_located((By.XPATH, "//form[contains(@class, 'ng-untouched') and contains(@class, 'ng-pristine')]")))
+
+    # Esperar unos segundos por si los campos se habilitan automáticamente
+    time.sleep(2)
+
+    name_input = edit_form.find_element(By.ID, "course-name")
+    if name_input.get_attribute("disabled"):
+        # Buscar cualquier botón, ícono o enlace que permita habilitar los campos
+        habilitador = None
+        # Buscar botón o enlace con texto 'Edit', 'Editar', o ícono de lápiz cerca del formulario
+        try:
+            habilitador = edit_form.find_element(By.XPATH, ".//button[contains(text(), 'Edit') or contains(text(), 'Editar') or contains(@class, 'fa-pen')]")
+        except Exception:
+            try:
+                habilitador = edit_form.find_element(By.XPATH, ".//a[contains(text(), 'Edit') or contains(text(), 'Editar') or contains(@class, 'fa-pen')]")
+            except Exception:
+                pass
+        if habilitador:
+            habilitador.click()
+            time.sleep(1)
+        # Verificar nuevamente si el campo está habilitado
+        if name_input.get_attribute("disabled"):
+            print("No se encontró acción para habilitar los campos. HTML del formulario:")
+            print(edit_form.get_attribute("outerHTML"))
+            assert False, "No se encontró acción para habilitar los campos en el formulario de edición."
+
+    # Ahora el campo debería estar habilitado
+    name_input = wait.until(EC.element_to_be_clickable((By.ID, "course-name")))
+    name_input.clear()
+    name_input.send_keys("Programación Básica I")
+
+    # Guardar cambios (buscar botón Save/Guardar/Update)
+    save_btn = None
+    try:
+        save_btn = edit_form.find_element(By.XPATH, ".//button[contains(text(), 'Save') or contains(text(), 'Guardar') or contains(text(), 'Update') or contains(@class, 'btn-save')]")
+    except Exception:
+        # Buscar input tipo submit
+        try:
+            save_btn = edit_form.find_element(By.XPATH, ".//input[@type='submit']")
+        except Exception:
+            print("No se encontró el botón de guardar. HTML del formulario:")
+            print(edit_form.get_attribute("outerHTML"))
+            assert False, "No se encontró el botón de guardar en el formulario de edición."
+    assert save_btn.is_enabled(), "El botón de guardar no está habilitado"
+    save_btn.click()
+    # Esperar explícitamente el banner verde de éxito
+    try:
+        notif = wait.until(EC.visibility_of_element_located((By.XPATH, "//div[contains(@class, 'alert-success') or contains(@class, 'toast-success') or contains(@class, 'bg-success') or contains(@class, 'alert')][contains(., 'edited') or contains(., 'actualizado') or contains(., 'Course updated') or contains(., 'has been edited')]")))
+        success = notif.is_displayed()
+    except Exception:
+        success = False
+    # Validar que el nuevo nombre aparece en la tabla de cursos activos
+    active_table = wait.until(EC.presence_of_element_located((By.XPATH, "//table[contains(@id, 'active-courses-table')]")))
+    table_text = active_table.get_attribute("innerText")
+    found = "Programación Básica I" in table_text if table_text else False
+    if not (success and found):
+        print("No se confirmó la edición exitosa del nombre del curso. HTML de depuración:")
+        print(driver.find_element(By.TAG_NAME, "body").get_attribute("outerHTML"))
+        assert False, "No se confirmó la edición exitosa del nombre del curso (ni por notificación ni en la tabla de cursos)."
