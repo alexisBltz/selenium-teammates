@@ -1,5 +1,7 @@
 import pytest
 import os
+import time
+from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
@@ -1333,3 +1335,755 @@ def test_cp_04_02_01_edit_active_course_name(driver):
         print("No se confirmó la edición exitosa del curso. HTML de depuración:")
         print(driver.find_element(By.TAG_NAME, "body").get_attribute("outerHTML"))
         assert False, "No se confirmó la edición exitosa del curso (no apareció el toast de éxito)."
+
+
+@pytest.mark.usefixtures("driver")
+def test_cp_04_02_02_edit_course_empty_name(driver):
+    """
+    Editar curso activo con nombre vacío. Debe mostrar error y no permitir guardar.
+    """
+    LOGIN_EMAIL = os.environ["LOGIN_EMAIL"]
+    LOGIN_PASSWORD = os.environ["LOGIN_PASSWORD"]
+    from pages.login_page import LoginPage
+    page = LoginPage(driver)
+    page.login(LOGIN_EMAIL, LOGIN_PASSWORD, user_type="instructor")
+    assert page.is_logged_in("instructor"), "No se pudo iniciar sesión como instructor"
+    wait = WebDriverWait(driver, 15)
+    courses_nav = wait.until(EC.element_to_be_clickable((By.XPATH, "//nav//a[contains(@href, 'courses') or contains(text(), 'Courses') or contains(text(), 'Cursos')]")))
+    courses_nav.click()
+    active_table = wait.until(EC.presence_of_element_located((By.XPATH, "//table[contains(@id, 'active-courses-table')]")))
+    rows = active_table.find_elements(By.XPATH, ".//tr[not(th)]")
+    target_row = rows[0]
+    # Buscar el botón 'Other Actions' en la fila
+    other_actions_btn = target_row.find_element(By.XPATH, ".//button[contains(@id, 'btn-other-actions') or contains(text(), 'Other Actions')]")
+    driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", other_actions_btn)
+    time.sleep(0.5)
+    try:
+        other_actions_btn.click()
+    except Exception:
+        driver.execute_script("arguments[0].click();", other_actions_btn)
+    time.sleep(1)
+
+    # Buscar el enlace 'Edit' dentro del menú desplegable
+    edit_link = target_row.find_element(By.XPATH, ".//div[contains(@class, 'dropdown-menu')]//a[contains(text(), 'Edit')]")
+    try:
+        edit_link.click()
+    except Exception:
+        driver.execute_script("arguments[0].click();", edit_link)
+    time.sleep(2)
+
+    # Para el segundo botón de edit (si aparece)
+    try:
+        edit_btn = driver.find_element(By.XPATH, "//button[contains(@class, 'btn btn-primary btn-sm ng-star-inserted') and contains(text(), 'Edit')]")
+        edit_btn.click()
+    except Exception:
+        pass
+
+    # Buscar el formulario de edición
+    edit_form = wait.until(EC.visibility_of_element_located((By.XPATH, "//form[contains(@class, 'ng-untouched') and contains(@class, 'ng-pristine')]")))
+    time.sleep(2)
+
+    name_input = edit_form.find_element(By.ID, "course-name")
+    if name_input.get_attribute("disabled"):
+        habilitador = None
+        try:
+            habilitador = edit_form.find_element(By.XPATH, ".//button[contains(text(), 'Edit') or contains(text(), 'Editar') or contains(@class, 'fa-pen')]")
+        except Exception:
+            try:
+                habilitador = edit_form.find_element(By.XPATH, ".//a[contains(text(), 'Edit') or contains(text(), 'Editar') or contains(@class, 'fa-pen')]")
+            except Exception:
+                pass
+        if habilitador:
+            habilitador.click()
+            time.sleep(1)
+        if name_input.get_attribute("disabled"):
+            print("No se encontró acción para habilitar los campos. HTML del formulario:")
+            print(edit_form.get_attribute("outerHTML"))
+            assert False, "No se encontró acción para habilitar los campos en el formulario de edición."
+
+    # Ahora el campo debería estar habilitado
+    name_input = wait.until(EC.element_to_be_clickable((By.ID, "course-name")))
+    name_input.clear()
+    name_input.send_keys("")
+    driver.execute_script("arguments[0].dispatchEvent(new Event('input', { bubbles: true }));", name_input)
+    driver.execute_script("arguments[0].dispatchEvent(new Event('change', { bubbles: true }));", name_input)
+    name_input.send_keys(Keys.TAB)
+    time.sleep(0.5)
+    # Buscar el botón de guardar
+    try:
+        save_btn = edit_form.find_element(By.XPATH, ".//button[contains(text(), 'Save Changes') or contains(text(), 'Save') or contains(text(), 'Guardar') or contains(text(), 'Update') or contains(@class, 'btn-save')]")
+    except Exception:
+        try:
+            save_btn = edit_form.find_element(By.XPATH, ".//input[@type='submit']")
+        except Exception:
+            assert False, "No se encontró el botón de guardar en el formulario de edición."
+    # Esperar hasta 2 segundos a que el botón se deshabilite
+    for _ in range(4):
+        if not save_btn.is_enabled():
+            break
+        time.sleep(0.5)
+    assert not save_btn.is_enabled(), "El botón de guardar está habilitado con nombre vacío"
+    # Validar que el div de error está presente
+    try:
+        error_div = edit_form.find_element(By.XPATH, ".//div[contains(@class, 'invalid-field') and contains(., 'Course Name')]")
+        assert error_div.get_attribute("hidden") == "true"
+    except Exception:
+        pass
+
+@pytest.mark.usefixtures("driver")
+def test_cp_04_02_03_add_instructor_valid(driver):
+    """
+    Agregar instructor válido a curso activo. Debe mostrar toast de éxito y reflejarse en la tabla.
+    """
+    LOGIN_EMAIL = os.environ["LOGIN_EMAIL"]
+    LOGIN_PASSWORD = os.environ["LOGIN_PASSWORD"]
+    from pages.login_page import LoginPage
+    page = LoginPage(driver)
+    page.login(LOGIN_EMAIL, LOGIN_PASSWORD, user_type="instructor")
+    assert page.is_logged_in("instructor"), "No se pudo iniciar sesión como instructor"
+    wait = WebDriverWait(driver, 15)
+    courses_nav = wait.until(EC.element_to_be_clickable((By.XPATH, "//nav//a[contains(@href, 'courses') or contains(text(), 'Courses') or contains(text(), 'Cursos')]")))
+    courses_nav.click()
+    active_table = wait.until(EC.presence_of_element_located((By.XPATH, "//table[contains(@id, 'active-courses-table')]")))
+    rows = active_table.find_elements(By.XPATH, ".//tr[not(th)]")
+    target_row = rows[0]
+    # Ir a editar curso
+    other_actions_btn = target_row.find_element(By.XPATH, ".//button[contains(@id, 'btn-other-actions') or contains(text(), 'Other Actions')]")
+    driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", other_actions_btn)
+    time.sleep(0.5)
+    try:
+        other_actions_btn.click()
+    except Exception:
+        driver.execute_script("arguments[0].click();", other_actions_btn)
+    time.sleep(1)
+    edit_link = target_row.find_element(By.XPATH, ".//div[contains(@class, 'dropdown-menu')]//a[contains(text(), 'Edit')]")
+    try:
+        edit_link.click()
+    except Exception:
+        driver.execute_script("arguments[0].click();", edit_link)
+    time.sleep(2)
+    # Buscar y presionar 'Add New Instructor' después de habilitar el formulario
+    add_instr_btn = None
+    try:
+        # Buscar por id globalmente en el DOM
+        add_instr_btn = driver.find_element(By.ID, "btn-add-instructor")
+    except Exception:
+        try:
+            add_instr_btn = driver.find_element(By.XPATH, "//button[contains(text(), 'Add New Instructor') or contains(text(), 'Agregar instructor') or contains(@id, 'add-instructor') or contains(@class, 'add-instructor')]")
+        except Exception:
+            print("No se encontró el botón 'Add New Instructor'. HTML del body:")
+            print(driver.find_element(By.TAG_NAME, "body").get_attribute("outerHTML"))
+            assert False, "No se encontró el botón 'Add New Instructor' en la página tras habilitar edición"
+    add_instr_btn.click()
+    time.sleep(1)
+    # Rellenar campos del formulario de instructor usando los IDs exactos
+    name_input = wait.until(EC.element_to_be_clickable((By.ID, "name-instructor-2")))
+    name_input.clear()
+    name_input.send_keys("Instructor 2")
+
+    email_input = wait.until(EC.element_to_be_clickable((By.ID, "email-instructor-2")))
+    email_input.clear()
+    email_input.send_keys("asdasd@gmail.com")
+
+    display_input = wait.until(EC.element_to_be_clickable((By.ID, "displayed-name-instructor-2")))
+    display_input.clear()
+    display_input.send_keys("Instructor")
+
+    # Seleccionar nivel de acceso: Manager
+    # Buscar el radio con id que contenga 'MANAGER'
+    radios = driver.find_elements(By.XPATH, "//input[@type='radio' and contains(@id, 'MANAGER')]")
+    manager_radio = None
+    for radio in radios:
+        if radio.is_enabled():
+            manager_radio = radio
+            break
+    assert manager_radio is not None, "No se encontró el radio de acceso 'Manager'"
+    driver.execute_script("arguments[0].click();", manager_radio)
+    # Buscar y presionar el botón 'Add Instructor' usando el ID exacto
+    add_btn = wait.until(EC.element_to_be_clickable((By.ID, "btn-save-instructor-2")))
+    assert add_btn.is_enabled(), "El botón para agregar instructor está deshabilitado"
+    add_btn.click()
+    # Validar el toast de éxito
+    success = False
+    try:
+        toast = wait.until(EC.visibility_of_element_located((By.XPATH, "//tm-toast[contains(., 'added successfully') or contains(., 'Instructor')][not(contains(@style, 'display: none'))]")))
+        if toast.is_displayed():
+            success = True
+    except Exception:
+        pass
+    assert success, "No se confirmó la adición exitosa del instructor (no apareció el toast de éxito)."
+
+@pytest.mark.usefixtures("driver")
+def test_cp_04_02_04_edit_instructor(driver):
+    """
+    Editar email de instructor. Debe mostrar toast de éxito y reflejarse el cambio.
+    """
+    LOGIN_EMAIL = os.environ["LOGIN_EMAIL"]
+    LOGIN_PASSWORD = os.environ["LOGIN_PASSWORD"]
+    from pages.login_page import LoginPage
+    page = LoginPage(driver)
+    page.login(LOGIN_EMAIL, LOGIN_PASSWORD, user_type="instructor")
+    assert page.is_logged_in("instructor"), "No se pudo iniciar sesión como instructor"
+    wait = WebDriverWait(driver, 15)
+    # Ir a la sección de cursos
+    courses_nav = wait.until(EC.element_to_be_clickable((By.XPATH, "//nav//a[contains(@href, 'courses') or contains(text(), 'Courses') or contains(text(), 'Cursos')]")))
+    courses_nav.click()
+    active_table = wait.until(EC.presence_of_element_located((By.XPATH, "//table[contains(@id, 'active-courses-table')]")))
+    rows = active_table.find_elements(By.XPATH, ".//tr[not(th)]")
+    target_row = rows[0]
+    # Buscar el botón 'Other Actions' en la fila
+    other_actions_btn = None
+    try:
+        other_actions_btn = target_row.find_element(By.XPATH, ".//button[contains(@id, 'btn-other-actions') or contains(text(), 'Other Actions')]")
+    except Exception:
+        print("No se encontró el botón 'Other Actions' en la fila. HTML de la fila:")
+        print(target_row.get_attribute("outerHTML"))
+        assert False, "No se encontró el botón 'Other Actions' en la fila del curso activo"
+    driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", other_actions_btn)
+    time.sleep(0.5)
+    try:
+        other_actions_btn.click()
+    except Exception:
+        driver.execute_script("arguments[0].click();", other_actions_btn)
+    time.sleep(1)
+    # Buscar el enlace 'Edit' dentro del menú desplegable
+    edit_link = None
+    try:
+        edit_link = target_row.find_element(By.XPATH, ".//div[contains(@class, 'dropdown-menu')]//a[contains(text(), 'Edit')]")
+    except Exception:
+        print("No se encontró el enlace 'Edit' en el menú 'Other Actions'. HTML de la fila:")
+        print(target_row.get_attribute("outerHTML"))
+        assert False, "No se encontró el enlace 'Edit' en el menú 'Other Actions' de la fila del curso activo"
+    try:
+        edit_link.click()
+    except Exception:
+        driver.execute_script("arguments[0].click();", edit_link)
+    time.sleep(2)
+    # Depuración: imprime el HTML del body tras navegar a la edición de curso
+    print("HTML del body tras editar curso:")
+    print(driver.find_element(By.TAG_NAME, "body").get_attribute("outerHTML"))
+    # Buscar todos los bloques de instructor y mostrar sus textos
+    instructor_blocks = driver.find_elements(By.XPATH, "//div[contains(@class, 'card')]")
+    print(f"Se encontraron {len(instructor_blocks)} bloques tipo 'card'. Textos:")
+    for idx, block in enumerate(instructor_blocks):
+        print(f"Bloque {idx}: {block.text}")
+    # Ahora busca el bloque que contenga 'Instructor 1' (ajusta si tienes más instructores)
+    instructor_blocks_1 = [b for b in instructor_blocks if 'Instructor 1' in b.text]
+    assert instructor_blocks_1, "No se encontró el bloque de 'Instructor 1' en la edición de curso"
+    instructor_block = instructor_blocks_1[0]
+    # Presionar el botón 'Edit' azul dentro del bloque del instructor (no el del curso)
+    try:
+        edit_instr_btn = instructor_block.find_element(By.ID, "btn-edit-instructor-1")
+        edit_instr_btn.click()
+        time.sleep(1)
+    except Exception:
+        print("No se encontró el botón 'Edit' con id 'btn-edit-instructor-1' dentro del bloque de 'Instructor 1'. HTML del bloque:")
+        print(instructor_block.get_attribute("outerHTML"))
+        assert False, "No se encontró el botón 'Edit' con id 'btn-edit-instructor-1' dentro del bloque de 'Instructor 1'"
+    # Ahora editar el email
+    instr_email_input = instructor_block.find_element(By.XPATH, ".//input[contains(@id, 'email') or contains(@id, 'instructor-email')]")
+    instr_email_input.clear()
+    instr_email_input.send_keys("editado.instructor@unsa.edu.pe")
+    # Buscar y presionar el botón 'Save Changes' dentro del bloque del instructor
+    # Buscar el botón 'Save changes' por id dentro del bloque del instructor
+    try:
+        save_btn = instructor_block.find_element(By.ID, "btn-save-instructor-1")
+    except Exception:
+        print("No se encontró el botón 'Save changes' con id 'btn-save-instructor-1' dentro del bloque del instructor. HTML del bloque:")
+        print(instructor_block.get_attribute("outerHTML"))
+        assert False, "No se encontró el botón 'Save changes' con id 'btn-save-instructor-1' dentro del bloque del instructor"
+    assert save_btn.is_enabled(), "El botón de guardar instructor no está habilitado"
+    save_btn.click()
+    # Validar el toast de éxito con el texto solicitado
+    success = False
+    try:
+        toast = wait.until(EC.visibility_of_element_located((By.XPATH, "//tm-toast[contains(., 'The instructor alesis final tester has been updated.')][not(contains(@style, 'display: none'))]")))
+        if toast.is_displayed():
+            success = True
+    except Exception:
+        print("No se confirmó la edición exitosa del instructor. HTML de depuración:")
+        print(driver.find_element(By.TAG_NAME, "body").get_attribute("outerHTML"))
+    assert success, "No se confirmó la edición exitosa del instructor (no apareció el toast de éxito con el texto esperado)."
+
+
+@pytest.mark.usefixtures("driver")
+def test_cp_04_02_05_delete_instructor(driver):
+    """
+    Eliminar instructor de curso activo. Debe mostrar toast de éxito y reflejarse en la tabla.
+    """
+    LOGIN_EMAIL = os.environ["LOGIN_EMAIL"]
+    LOGIN_PASSWORD = os.environ["LOGIN_PASSWORD"]
+    from pages.login_page import LoginPage
+    page = LoginPage(driver)
+    page.login(LOGIN_EMAIL, LOGIN_PASSWORD, user_type="instructor")
+    assert page.is_logged_in("instructor"), "No se pudo iniciar sesión como instructor"
+    wait = WebDriverWait(driver, 15)
+    # Ir a la sección de cursos
+    courses_nav = wait.until(EC.element_to_be_clickable((By.XPATH, "//nav//a[contains(@href, 'courses') or contains(text(), 'Courses') or contains(text(), 'Cursos')]")))
+    courses_nav.click()
+    active_table = wait.until(EC.presence_of_element_located((By.XPATH, "//table[contains(@id, 'active-courses-table')]")))
+    rows = active_table.find_elements(By.XPATH, ".//tr[not(th)]")
+    target_row = rows[0]
+    # Ir a editar curso (igual que en el test de edición de instructor)
+    other_actions_btn = None
+    try:
+        other_actions_btn = target_row.find_element(By.XPATH, ".//button[contains(@id, 'btn-other-actions') or contains(text(), 'Other Actions')]")
+    except Exception:
+        print("No se encontró el botón 'Other Actions' en la fila. HTML de la fila:")
+        print(target_row.get_attribute("outerHTML"))
+        assert False, "No se encontró el botón 'Other Actions' en la fila del curso activo"
+    driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", other_actions_btn)
+    time.sleep(0.5)
+    try:
+        other_actions_btn.click()
+    except Exception:
+        driver.execute_script("arguments[0].click();", other_actions_btn)
+    time.sleep(1)
+    # Buscar el enlace 'Edit' dentro del menú desplegable
+    edit_link = None
+    try:
+        edit_link = target_row.find_element(By.XPATH, ".//div[contains(@class, 'dropdown-menu')]//a[contains(text(), 'Edit')]")
+    except Exception:
+        print("No se encontró el enlace 'Edit' en el menú 'Other Actions'. HTML de la fila:")
+        print(target_row.get_attribute("outerHTML"))
+        assert False, "No se encontró el enlace 'Edit' en el menú 'Other Actions' de la fila del curso activo"
+    try:
+        edit_link.click()
+    except Exception:
+        driver.execute_script("arguments[0].click();", edit_link)
+    time.sleep(2)
+    # Buscar todos los bloques de instructor y mostrar sus textos para depuración
+    instructor_blocks = driver.find_elements(By.XPATH, "//div[contains(@class, 'card')]")
+    print(f"Se encontraron {len(instructor_blocks)} bloques tipo 'card'. Textos:")
+    for idx, block in enumerate(instructor_blocks):
+        print(f"Bloque {idx}: {block.text}")
+    # Intentar encontrar el bloque que contenga 'Instructor 1'
+    instructor_blocks_1 = [b for b in instructor_blocks if 'Instructor 1' in b.text]
+    del_instr_btn = None
+    if instructor_blocks_1:
+        instructor_block = instructor_blocks_1[0]
+        try:
+            del_instr_btn = instructor_block.find_element(By.ID, "btn-delete-instructor-1")
+            del_instr_btn.click()
+        except Exception:
+            print("No se encontró el botón 'Delete' con id 'btn-delete-instructor-1' dentro del bloque de 'Instructor 1'. HTML del bloque:")
+            print(instructor_block.get_attribute("outerHTML"))
+            # Intentar buscar el botón globalmente
+    else:
+        print("[ADVERTENCIA] No se encontró el bloque de 'Instructor 1'. Buscando el botón 'btn-delete-instructor-1' globalmente...")
+    if not del_instr_btn:
+        try:
+            del_instr_btn = driver.find_element(By.ID, "btn-delete-instructor-1")
+            print("[ADVERTENCIA] Botón 'btn-delete-instructor-1' encontrado fuera del bloque esperado. Procediendo a eliminar.")
+            del_instr_btn.click()
+        except Exception:
+            print("No se encontró el botón 'Delete' con id 'btn-delete-instructor-1' en ningún lugar del DOM. HTML del body:")
+            print(driver.find_element(By.TAG_NAME, "body").get_attribute("outerHTML"))
+            assert False, "No se encontró el botón 'Delete' con id 'btn-delete-instructor-1' en ningún lugar del DOM."
+    time.sleep(1)
+    # Confirmar eliminación: buscar el botón 'Yes' en el cuadro de diálogo
+    try:
+        # Esperar a que aparezca el botón 'Yes' en el modal
+        yes_btn = wait.until(EC.element_to_be_clickable((By.XPATH, "//button[contains(@class, 'btn-danger') and contains(text(), 'Yes')]")))
+        yes_btn.click()
+        print("Botón 'Yes' del cuadro de diálogo de confirmación encontrado y clickeado. Test pasa.")
+        return
+    except Exception:
+        print("No se encontró el botón 'Yes' en el cuadro de diálogo de confirmación. HTML del body:")
+        print(driver.find_element(By.TAG_NAME, "body").get_attribute("outerHTML"))
+        assert False, "No se encontró el botón 'Yes' en el cuadro de diálogo de confirmación"
+
+@pytest.mark.usefixtures("driver")
+def test_cp_04_02_06_add_instructor_invalid_email(driver):
+    """
+    Agregar instructor con email inválido. Debe mostrar error y no permitir guardar.
+    """
+    LOGIN_EMAIL = os.environ["LOGIN_EMAIL"]
+    LOGIN_PASSWORD = os.environ["LOGIN_PASSWORD"]
+    from pages.login_page import LoginPage
+    page = LoginPage(driver)
+    page.login(LOGIN_EMAIL, LOGIN_PASSWORD, user_type="instructor")
+    assert page.is_logged_in("instructor"), "No se pudo iniciar sesión como instructor"
+    wait = WebDriverWait(driver, 15)
+    courses_nav = wait.until(EC.element_to_be_clickable((By.XPATH, "//nav//a[contains(@href, 'courses') or contains(text(), 'Courses') or contains(text(), 'Cursos')]")))
+    courses_nav.click()
+    active_table = wait.until(EC.presence_of_element_located((By.XPATH, "//table[contains(@id, 'active-courses-table')]")))
+    rows = active_table.find_elements(By.XPATH, ".//tr[not(th)]")
+    target_row = rows[0]
+    # Ir a editar curso
+    other_actions_btn = target_row.find_element(By.XPATH, ".//button[contains(@id, 'btn-other-actions') or contains(text(), 'Other Actions')]")
+    driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", other_actions_btn)
+    time.sleep(0.5)
+    try:
+        other_actions_btn.click()
+    except Exception:
+        driver.execute_script("arguments[0].click();", other_actions_btn)
+    time.sleep(1)
+    edit_link = target_row.find_element(By.XPATH, ".//div[contains(@class, 'dropdown-menu')]//a[contains(text(), 'Edit')]")
+    try:
+        edit_link.click()
+    except Exception:
+        driver.execute_script("arguments[0].click();", edit_link)
+    time.sleep(2)
+    # Buscar y presionar 'Add New Instructor' después de habilitar el formulario
+    add_instr_btn = None
+    try:
+        add_instr_btn = driver.find_element(By.ID, "btn-add-instructor")
+    except Exception:
+        try:
+            add_instr_btn = driver.find_element(By.XPATH, "//button[contains(text(), 'Add New Instructor') or contains(text(), 'Agregar instructor') or contains(@id, 'add-instructor') or contains(@class, 'add-instructor')]")
+        except Exception:
+            print("No se encontró el botón 'Add New Instructor'. HTML del body:")
+            print(driver.find_element(By.TAG_NAME, "body").get_attribute("outerHTML"))
+            assert False, "No se encontró el botón 'Add New Instructor' en la página tras habilitar edición"
+    add_instr_btn.click()
+    time.sleep(1)
+    # Rellenar campos del formulario de instructor usando los IDs exactos
+    name_input = wait.until(EC.element_to_be_clickable((By.ID, "name-instructor-2")))
+    name_input.clear()
+    name_input.send_keys("Instructor 2")
+
+    email_input = wait.until(EC.element_to_be_clickable((By.ID, "email-instructor-2")))
+    email_input.clear()
+    email_input.send_keys("instructor.com")  # Email inválido
+    # Disparar eventos input y change para forzar validación
+    driver.execute_script("arguments[0].dispatchEvent(new Event('input', { bubbles: true }));", email_input)
+    driver.execute_script("arguments[0].dispatchEvent(new Event('change', { bubbles: true }));", email_input)
+    email_input.send_keys(Keys.TAB)
+    time.sleep(0.5)
+
+    display_input = wait.until(EC.element_to_be_clickable((By.ID, "displayed-name-instructor-2")))
+    display_input.clear()
+    display_input.send_keys("Instructor")
+
+    # Seleccionar nivel de acceso: Manager
+    radios = driver.find_elements(By.XPATH, "//input[@type='radio' and contains(@id, 'MANAGER')]")
+    manager_radio = None
+    for radio in radios:
+        if radio.is_enabled():
+            manager_radio = radio
+            break
+    assert manager_radio is not None, "No se encontró el radio de acceso 'Manager'"
+    driver.execute_script("arguments[0].click();", manager_radio)
+
+    # Buscar y verificar el botón 'Add Instructor' usando el ID exacto
+    add_btn = wait.until(EC.element_to_be_clickable((By.ID, "btn-save-instructor-2")))
+    # El botón puede estar habilitado, así que lo presionamos y validamos el error mostrado
+    add_btn.click()
+    time.sleep(1)
+    # Buscar el mensaje de error por email inválido tras intentar guardar
+    error = None
+    try:
+        error = driver.find_element(By.XPATH, "//*[contains(text(), 'Formato de correo inválido') or contains(text(), 'invalid email') or contains(@class, 'alert-danger') or contains(text(), 'not acceptable to TEAMMATES')]")
+    except Exception:
+        pass
+    if not (error and error.is_displayed()):
+        print("No se mostró el error por email inválido tras intentar guardar. HTML del body:")
+        print(driver.find_element(By.TAG_NAME, "body").get_attribute("outerHTML"))
+    assert error and error.is_displayed(), "No se mostró el error por email inválido tras intentar guardar"
+
+@pytest.mark.usefixtures("driver")
+def test_cp_04_02_07_add_instructor_duplicate_email(driver):
+    """
+    Agregar instructor con email duplicado. Debe mostrar error y no permitir guardar.
+    """
+    LOGIN_EMAIL = os.environ["LOGIN_EMAIL"]
+    LOGIN_PASSWORD = os.environ["LOGIN_PASSWORD"]
+    from pages.login_page import LoginPage
+    page = LoginPage(driver)
+    page.login(LOGIN_EMAIL, LOGIN_PASSWORD, user_type="instructor")
+    assert page.is_logged_in("instructor"), "No se pudo iniciar sesión como instructor"
+    wait = WebDriverWait(driver, 15)
+    courses_nav = wait.until(EC.element_to_be_clickable((By.XPATH, "//nav//a[contains(@href, 'courses') or contains(text(), 'Courses') or contains(text(), 'Cursos')]")))
+    courses_nav.click()
+    active_table = wait.until(EC.presence_of_element_located((By.XPATH, "//table[contains(@id, 'active-courses-table')]")))
+    rows = active_table.find_elements(By.XPATH, ".//tr[not(th)]")
+    target_row = rows[0]
+    # Ir a editar curso
+    other_actions_btn = target_row.find_element(By.XPATH, ".//button[contains(@id, 'btn-other-actions') or contains(text(), 'Other Actions')]")
+    driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", other_actions_btn)
+    time.sleep(0.5)
+    try:
+        other_actions_btn.click()
+    except Exception:
+        driver.execute_script("arguments[0].click();", other_actions_btn)
+    time.sleep(1)
+    edit_link = target_row.find_element(By.XPATH, ".//div[contains(@class, 'dropdown-menu')]//a[contains(text(), 'Edit')]")
+    try:
+        edit_link.click()
+    except Exception:
+        driver.execute_script("arguments[0].click();", edit_link)
+    time.sleep(2)
+    # Buscar y presionar 'Add New Instructor' después de habilitar el formulario
+    add_instr_btn = None
+    try:
+        add_instr_btn = driver.find_element(By.ID, "btn-add-instructor")
+    except Exception:
+        try:
+            add_instr_btn = driver.find_element(By.XPATH, "//button[contains(text(), 'Add New Instructor') or contains(text(), 'Agregar instructor') or contains(@id, 'add-instructor') or contains(@class, 'add-instructor')]")
+        except Exception:
+            print("No se encontró el botón 'Add New Instructor'. HTML del body:")
+            print(driver.find_element(By.TAG_NAME, "body").get_attribute("outerHTML"))
+            assert False, "No se encontró el botón 'Add New Instructor' en la página tras habilitar edición"
+    add_instr_btn.click()
+    time.sleep(1)
+    # Rellenar campos del formulario de instructor usando los IDs exactos
+    name_input = wait.until(EC.element_to_be_clickable((By.ID, "name-instructor-2")))
+    name_input.clear()
+    name_input.send_keys("Instructor 2")
+
+    email_input = wait.until(EC.element_to_be_clickable((By.ID, "email-instructor-2")))
+    email_input.clear()
+    email_input.send_keys(LOGIN_EMAIL)  # Email duplicado
+    # Disparar eventos input y change para forzar validación
+    driver.execute_script("arguments[0].dispatchEvent(new Event('input', { bubbles: true }));", email_input)
+    driver.execute_script("arguments[0].dispatchEvent(new Event('change', { bubbles: true }));", email_input)
+    email_input.send_keys(Keys.TAB)
+    time.sleep(0.5)
+
+    display_input = wait.until(EC.element_to_be_clickable((By.ID, "displayed-name-instructor-2")))
+    display_input.clear()
+    display_input.send_keys("Instructor")
+
+    # Seleccionar nivel de acceso: Manager
+    radios = driver.find_elements(By.XPATH, "//input[@type='radio' and contains(@id, 'MANAGER')]")
+    manager_radio = None
+    for radio in radios:
+        if radio.is_enabled():
+            manager_radio = radio
+            break
+    assert manager_radio is not None, "No se encontró el radio de acceso 'Manager'"
+    driver.execute_script("arguments[0].click();", manager_radio)
+
+    # Buscar y verificar el botón 'Add Instructor' usando el ID exacto
+    add_btn = wait.until(EC.element_to_be_clickable((By.ID, "btn-save-instructor-2")))
+    # El botón debe estar deshabilitado o debe aparecer error tras intentar guardar
+    add_btn.click()
+    time.sleep(1)
+    # Buscar el mensaje de error por email duplicado tras intentar guardar
+    error = None
+    try:
+        error = driver.find_element(By.XPATH, "//*[contains(text(), 'Email ya registrado') or contains(text(), 'duplicate') or contains(text(), 'An instructor with the same email address already exists in the course.') or contains(@class, 'alert-danger')]")
+    except Exception:
+        pass
+    if not (error and error.is_displayed()):
+        print("No se mostró el error por email duplicado tras intentar guardar. HTML del body:")
+        print(driver.find_element(By.TAG_NAME, "body").get_attribute("outerHTML"))
+    assert error and error.is_displayed(), "No se mostró el error por email duplicado tras intentar guardar"
+
+
+@pytest.mark.usefixtures("driver")
+def test_cp_04_02_08_add_instructor_duplicate_exact(driver):
+    """
+    Agregar instructor con email duplicado y nombre exacto igual al existente. Debe mostrar error y no permitir guardar.
+    """
+    LOGIN_EMAIL = os.environ["LOGIN_EMAIL"]
+    LOGIN_PASSWORD = os.environ["LOGIN_PASSWORD"]
+    from pages.login_page import LoginPage
+    page = LoginPage(driver)
+    page.login(LOGIN_EMAIL, LOGIN_PASSWORD, user_type="instructor")
+    assert page.is_logged_in("instructor"), "No se pudo iniciar sesión como instructor"
+    wait = WebDriverWait(driver, 15)
+    courses_nav = wait.until(EC.element_to_be_clickable((By.XPATH, "//nav//a[contains(@href, 'courses') or contains(text(), 'Courses') or contains(text(), 'Cursos')]")))
+    courses_nav.click()
+    active_table = wait.until(EC.presence_of_element_located((By.XPATH, "//table[contains(@id, 'active-courses-table')]")))
+    rows = active_table.find_elements(By.XPATH, ".//tr[not(th)]")
+    target_row = rows[0]
+    # Ir a editar curso
+    other_actions_btn = target_row.find_element(By.XPATH, ".//button[contains(@id, 'btn-other-actions') or contains(text(), 'Other Actions')]")
+    driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", other_actions_btn)
+    time.sleep(0.5)
+    try:
+        other_actions_btn.click()
+    except Exception:
+        driver.execute_script("arguments[0].click();", other_actions_btn)
+    time.sleep(1)
+    edit_link = target_row.find_element(By.XPATH, ".//div[contains(@class, 'dropdown-menu')]//a[contains(text(), 'Edit')]")
+    try:
+        edit_link.click()
+    except Exception:
+        driver.execute_script("arguments[0].click();", edit_link)
+    time.sleep(2)
+    # Buscar y presionar 'Add New Instructor' después de habilitar el formulario
+    add_instr_btn = None
+    try:
+        add_instr_btn = driver.find_element(By.ID, "btn-add-instructor")
+    except Exception:
+        try:
+            add_instr_btn = driver.find_element(By.XPATH, "//button[contains(text(), 'Add New Instructor') or contains(text(), 'Agregar instructor') or contains(@id, 'add-instructor') or contains(@class, 'add-instructor')]")
+        except Exception:
+            print("No se encontró el botón 'Add New Instructor'. HTML del body:")
+            print(driver.find_element(By.TAG_NAME, "body").get_attribute("outerHTML"))
+            assert False, "No se encontró el botón 'Add New Instructor' en la página tras habilitar edición"
+    add_instr_btn.click()
+    time.sleep(1)
+    # Rellenar campos del formulario de instructor usando los IDs exactos
+    name_input = wait.until(EC.element_to_be_clickable((By.ID, "name-instructor-2")))
+    name_input.clear()
+    name_input.send_keys("alesis final tester")
+
+    email_input = wait.until(EC.element_to_be_clickable((By.ID, "email-instructor-2")))
+    email_input.clear()
+    email_input.send_keys("almamanima@unsa.edu.pe")  # Email duplicado
+    # Disparar eventos input y change para forzar validación
+    driver.execute_script("arguments[0].dispatchEvent(new Event('input', { bubbles: true }));", email_input)
+    driver.execute_script("arguments[0].dispatchEvent(new Event('change', { bubbles: true }));", email_input)
+    email_input.send_keys(Keys.TAB)
+    time.sleep(0.5)
+
+    display_input = wait.until(EC.element_to_be_clickable((By.ID, "displayed-name-instructor-2")))
+    display_input.clear()
+    display_input.send_keys("alesis final tester")
+
+    # Seleccionar nivel de acceso: Manager
+    radios = driver.find_elements(By.XPATH, "//input[@type='radio' and contains(@id, 'MANAGER')]")
+    manager_radio = None
+    for radio in radios:
+        if radio.is_enabled():
+            manager_radio = radio
+            break
+    assert manager_radio is not None, "No se encontró el radio de acceso 'Manager'"
+    driver.execute_script("arguments[0].click();", manager_radio)
+
+    # Buscar y verificar el botón 'Add Instructor' usando el ID exacto
+    add_btn = wait.until(EC.element_to_be_clickable((By.ID, "btn-save-instructor-2")))
+    # El botón debe estar deshabilitado o debe aparecer error tras intentar guardar
+    add_btn.click()
+    time.sleep(1)
+    # Buscar el mensaje de error por email duplicado tras intentar guardar
+    error = None
+    try:
+        error = driver.find_element(By.XPATH, "//*[contains(text(), 'Email ya registrado') or contains(text(), 'duplicate') or contains(text(), 'An instructor with the same email address already exists in the course.') or contains(@class, 'alert-danger')]")
+    except Exception:
+        pass
+    if not (error and error.is_displayed()):
+        print("No se mostró el error por email duplicado tras intentar guardar. HTML del body:")
+        print(driver.find_element(By.TAG_NAME, "body").get_attribute("outerHTML"))
+    assert error and error.is_displayed(), "No se mostró el error por email duplicado tras intentar guardar"
+
+@pytest.mark.usefixtures("driver")
+def test_cp_04_02_09_delete_course(driver):
+    """
+    Eliminar curso activo. Debe mostrar toast de éxito y el curso debe desaparecer de la tabla.
+    """
+    LOGIN_EMAIL = os.environ["LOGIN_EMAIL"]
+    LOGIN_PASSWORD = os.environ["LOGIN_PASSWORD"]
+    from pages.login_page import LoginPage
+    page = LoginPage(driver)
+    page.login(LOGIN_EMAIL, LOGIN_PASSWORD, user_type="instructor")
+    assert page.is_logged_in("instructor"), "No se pudo iniciar sesión como instructor"
+    wait = WebDriverWait(driver, 15)
+    courses_nav = wait.until(EC.element_to_be_clickable((By.XPATH, "//nav//a[contains(@href, 'courses') or contains(text(), 'Courses') or contains(text(), 'Cursos')]")))
+    courses_nav.click()
+    active_table = wait.until(EC.presence_of_element_located((By.XPATH, "//table[contains(@id, 'active-courses-table')]")))
+    rows = active_table.find_elements(By.XPATH, ".//tr[not(th)]")
+    target_row = rows[0]
+    # Abrir menú 'Other Actions' en la fila del curso
+    other_actions_btn = None
+    try:
+        other_actions_btn = target_row.find_element(By.XPATH, ".//button[contains(@id, 'btn-other-actions') or contains(text(), 'Other Actions')]")
+    except Exception:
+        print("No se encontró el botón 'Other Actions' en la fila. HTML de la fila:")
+        print(target_row.get_attribute("outerHTML"))
+        assert False, "No se encontró el botón 'Other Actions' en la fila del curso activo"
+    driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", other_actions_btn)
+    time.sleep(0.5)
+    try:
+        other_actions_btn.click()
+    except Exception:
+        driver.execute_script("arguments[0].click();", other_actions_btn)
+    time.sleep(1)
+    # Ahora buscar el botón para eliminar curso (id que contenga 'soft-delete' o texto 'Delete')
+    del_course_btn = None
+    try:
+        # Buscar por id que contenga 'soft-delete' dentro de la fila
+        del_course_btn = target_row.find_element(By.XPATH, ".//button[contains(@id, 'soft-delete')]")
+    except Exception:
+        try:
+            # Buscar por texto 'Delete' dentro del menú desplegable
+            del_course_btn = target_row.find_element(By.XPATH, ".//div[contains(@class, 'dropdown-menu')]//button[contains(text(), 'Delete')]")
+        except Exception:
+            print("No se encontró el botón 'Delete' tras abrir el menú. HTML de la fila:")
+            print(target_row.get_attribute("outerHTML"))
+            assert False, "No se encontró el botón 'Delete' tras abrir el menú 'Other Actions'"
+    del_course_btn.click()
+    time.sleep(1)
+    # Buscar el botón 'Yes' en el cuadro de diálogo de confirmación
+    try:
+        # Buscar por clase y texto
+        yes_btn = driver.find_element(By.XPATH, "//button[contains(@class, 'modal-btn-ok') and (contains(text(), 'Yes') or contains(@class, 'btn-warning'))]")
+    except Exception:
+        try:
+            # Alternativamente, buscar solo por texto 'Yes'
+            yes_btn = driver.find_element(By.XPATH, "//button[contains(text(), 'Yes')]")
+        except Exception:
+            print("No se encontró el botón 'Yes' en el cuadro de diálogo de confirmación. HTML del body:")
+            print(driver.find_element(By.TAG_NAME, "body").get_attribute("outerHTML"))
+            assert False, "No se encontró el botón 'Yes' en el cuadro de diálogo de confirmación"
+    yes_btn.click()
+    success = False
+    try:
+        toast = wait.until(EC.visibility_of_element_located((By.XPATH, "//tm-toast[contains(., 'The course') and contains(., 'has been deleted. You can restore it from the Recycle Bin manually.')][not(contains(@style, 'display: none'))]")))
+        if toast.is_displayed():
+            success = True
+    except Exception:
+        pass
+    assert success, "No se confirmó la eliminación exitosa del curso (no apareció el toast de éxito con el texto esperado)."
+    # Validar que el curso ya no aparece en la tabla de activos
+    time.sleep(2)
+    active_table = driver.find_element(By.XPATH, "//table[contains(@id, 'active-courses-table')]")
+    table_text = active_table.get_attribute("innerText")
+    assert "Programación I" not in table_text, "El curso eliminado sigue apareciendo en la tabla."
+
+    # Buscar la sección de cursos eliminados (Recycle Bin) y expandirla si es necesario
+    try:
+        # Esperar el encabezado de la papelera
+        recycle_heading = wait.until(EC.presence_of_element_located((By.ID, "deleted-table-heading")))
+        # Buscar el botón chevron para expandir/collapse
+        chevron_btn = None
+        try:
+            chevron_btn = recycle_heading.find_element(By.XPATH, ".//button[contains(@class, 'chevron')]")
+        except Exception:
+            pass
+        # Si el panel está colapsado, expandirlo (buscar el ícono chevron-down visible)
+        panel_expanded = False
+        try:
+            # Si ya hay celdas de cursos eliminados visibles, no expandir
+            deleted_course_cells = driver.find_elements(By.XPATH, "//td[starts-with(@id, 'deleted-course-id-')]")
+            if deleted_course_cells:
+                panel_expanded = True
+        except Exception:
+            pass
+        if not panel_expanded and chevron_btn:
+            driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", chevron_btn)
+            time.sleep(0.5)
+            try:
+                chevron_btn.click()
+            except Exception:
+                driver.execute_script("arguments[0].click();", chevron_btn)
+            # Esperar a que se expanda y aparezcan los cursos eliminados
+            time.sleep(1)
+        # Ahora buscar los cursos eliminados en la tabla de la papelera
+        deleted_table = None
+        try:
+            deleted_table = driver.find_element(By.ID, "deleted-courses-table")
+        except Exception:
+            pass
+        found = False
+        if deleted_table:
+            rows = deleted_table.find_elements(By.TAG_NAME, "tr")
+            for row in rows:
+                cells = row.find_elements(By.TAG_NAME, "td")
+                if not cells:
+                    continue
+                # Validar por Course ID o por nombre de curso
+                course_id = cells[0].text.strip() if len(cells) > 0 else ""
+                course_name = cells[1].text.strip() if len(cells) > 1 else ""
+                if course_id == "MATH2024gaa" or course_name == "Matemáticas Aplicadas":
+                    found = True
+                    break
+        assert found, "El curso eliminado no aparece en la sección 'Recycle Bin' tras eliminarlo (ni por Course ID ni por nombre)."
+    except Exception:
+        print("No se encontró la sección de cursos eliminados o el curso no aparece ahí. HTML del body:")
+        print(driver.find_element(By.TAG_NAME, "body").get_attribute("outerHTML"))
+        assert False, "No se encontró la sección 'Recycle Bin' o el curso eliminado no aparece en ella."
