@@ -13,5 +13,7 @@ def driver():
     options.add_argument('--disable-features=EnableChromeBrowserCloudManagement,ChromeWhatsNewUI,ChromeProfilePicker')
     service = Service(ChromeDriverManager().install())
     driver = webdriver.Chrome(service=service, options=options)
+    version = driver.capabilities['browserVersion']
+    print(f"Versión de Chrome usada por Selenium: {version}")
     yield driver
     driver.quit()

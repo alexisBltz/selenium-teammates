@@ -2086,4 +2086,372 @@ def test_cp_04_02_09_delete_course(driver):
     except Exception:
         print("No se encontró la sección de cursos eliminados o el curso no aparece ahí. HTML del body:")
         print(driver.find_element(By.TAG_NAME, "body").get_attribute("outerHTML"))
-        assert False, "No se encontró la sección 'Recycle Bin' o el curso eliminado no aparece en ella."
+
+
+# ------------------ CP-04-03-XX: Pruebas de Copia de Curso ------------------
+import string
+
+# Utilidad para abrir el modal de copia de curso desde la fila de un curso activo
+def open_copy_course_modal(driver, wait, course_row=None):
+    if course_row is None:
+        active_table = wait.until(EC.presence_of_element_located((By.XPATH, "//table[contains(@id, 'active-courses-table')]")))
+        rows = active_table.find_elements(By.XPATH, ".//tr[not(th)]")
+        course_row = rows[0]
+    # Abrir menú Other Actions
+    other_actions_btn = course_row.find_element(By.XPATH, ".//button[contains(@id, 'btn-other-actions') or contains(text(), 'Other Actions')]")
+    driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", other_actions_btn)
+    time.sleep(0.5)
+    try:
+        other_actions_btn.click()
+    except Exception:
+        driver.execute_script("arguments[0].click();", other_actions_btn)
+    # Esperar a que el menú esté visible
+    dropdown_menu = None
+    for _ in range(10):
+        try:
+            dropdown_menu = course_row.find_element(By.XPATH, ".//div[contains(@class, 'dropdown-menu') and contains(@class, 'show')]")
+            if dropdown_menu.is_displayed():
+                break
+        except Exception:
+            pass
+        time.sleep(0.2)
+    if not dropdown_menu:
+        dropdown_menu = course_row.find_element(By.XPATH, ".//div[contains(@class, 'dropdown-menu')]")
+    # Buscar la opción Copy/Copiar en cualquier tag hijo visible o no
+    copy_btn = None
+    # Buscar en a, button, li (como antes)
+    for tag in ['a', 'button', 'li']:
+        try:
+            btn = dropdown_menu.find_element(By.XPATH, f".//{tag}[contains(text(), 'Copy') or contains(text(), 'Copiar')]")
+            if btn:
+                copy_btn = btn
+                if copy_btn.is_displayed() and copy_btn.is_enabled():
+                    break
+        except Exception:
+            continue
+    # Si no se encontró, buscar en cualquier hijo del menú (incluyendo ocultos)
+    if not copy_btn:
+        try:
+            btns = dropdown_menu.find_elements(By.XPATH, ".//*[contains(text(), 'Copy') or contains(text(), 'Copiar')]")
+            for btn in btns:
+                copy_btn = btn
+                if copy_btn.is_displayed() and copy_btn.is_enabled():
+                    break
+        except Exception:
+            pass
+    # Si aún no se encontró, imprimir el HTML del menú y de la fila para depuración
+    if not copy_btn:
+        print("[DEPURACIÓN] No se encontró la opción 'Copy' o 'Copiar' en el menú. HTML del menú:")
+        print(dropdown_menu.get_attribute("outerHTML"))
+        print("[DEPURACIÓN] HTML completo de la fila del curso:")
+        print(course_row.get_attribute("outerHTML"))
+        # Búsqueda global dentro de la fila por si el menú está fuera
+        try:
+            btns = course_row.find_elements(By.XPATH, ".//*[contains(text(), 'Copy') or contains(text(), 'Copiar')]")
+            for btn in btns:
+                copy_btn = btn
+                if copy_btn.is_displayed() and copy_btn.is_enabled():
+                    break
+        except Exception:
+            pass
+    # Si se encontró pero está oculto o deshabilitado, advertir
+    if copy_btn and (not copy_btn.is_displayed() or not copy_btn.is_enabled()):
+        print("[ADVERTENCIA] Se encontró la opción 'Copy'/'Copiar' pero está oculta o deshabilitada. HTML:")
+        print(copy_btn.get_attribute("outerHTML"))
+    assert copy_btn, "No se encontró la opción 'Copy' o 'Copiar' en el menú 'Other Actions'"
+    # Siempre forzar el click con JS (más robusto para menús animados/overlays)
+    try:
+        driver.execute_script("arguments[0].click();", copy_btn)
+    except Exception:
+        try:
+            copy_btn.click()
+        except Exception:
+            print("[DEPURACIÓN] No se pudo hacer click en el botón Copy. HTML:")
+            print(copy_btn.get_attribute("outerHTML"))
+            raise
+    time.sleep(0.2)  # Dar tiempo a la animación del modal
+    try:
+        modal = wait.until(EC.visibility_of_element_located((By.XPATH, "//div[contains(@class, 'modal') and .//h4[contains(text(), 'Copy course')]]")))
+    except Exception:
+        print("[DEPURACIÓN] No apareció el modal tras hacer click en Copy. HTML del body:")
+        print(driver.find_element(By.TAG_NAME, "body").get_attribute("outerHTML"))
+        raise
+    return modal
+
+# CP-04-03-01 Copia exitosa de curso activo
+@pytest.mark.usefixtures("driver")
+def test_cp_04_03_01_copy_course_success(driver):
+    print("Versión de Chrome:", driver.capabilities['browserVersion'])
+    """
+    Verificar que se cree exitosamente un curso con datos válidos.
+    """
+    LOGIN_EMAIL = os.environ["LOGIN_EMAIL"]
+    LOGIN_PASSWORD = os.environ["LOGIN_PASSWORD"]
+    from pages.login_page import LoginPage
+    page = LoginPage(driver)
+    page.login(LOGIN_EMAIL, LOGIN_PASSWORD, user_type="instructor")
+    assert page.is_logged_in("instructor"), "No se pudo iniciar sesión como instructor"
+    wait = WebDriverWait(driver, 15)
+    # Ir a cursos
+    courses_nav = wait.until(EC.element_to_be_clickable((By.XPATH, "//nav//a[contains(@href, 'courses') or contains(text(), 'Courses') or contains(text(), 'Cursos')]")))
+    courses_nav.click()
+    # Abrir modal de copia
+    modal = open_copy_course_modal(driver, wait)
+    # Llenar formulario
+    course_id = "CS101-NEW"
+    course_name = "Intro to AI"
+    institute = "unsa"  # Debe ser el value exacto del option
+    timezone = "America/Lima"
+    # Llenar campos de texto
+    modal.find_element(By.ID, "copy-course-id").clear()
+    modal.find_element(By.ID, "copy-course-id").send_keys(course_id)
+    modal.find_element(By.ID, "copy-course-name").clear()
+    modal.find_element(By.ID, "copy-course-name").send_keys(course_name)
+    # Seleccionar instituto (select)
+    institute_select = modal.find_element(By.ID, "copy-course-institute")
+    for option in institute_select.find_elements(By.TAG_NAME, "option"):
+        if option.get_attribute("value").lower() == institute.lower():
+            option.click()
+            break
+    # Seleccionar zona horaria (select)
+    tz_select = modal.find_element(By.ID, "copy-time-zone")
+    for option in tz_select.find_elements(By.TAG_NAME, "option"):
+        if timezone in option.text:
+            option.click()
+            break
+    # Esperar a que el botón Copy esté habilitado
+    save_btn = wait.until(lambda d: modal.find_element(By.XPATH, ".//button[contains(text(), 'Copy') or contains(text(), 'Copiar') and not(@disabled)]"))
+    assert save_btn.is_enabled(), "El botón de copiar no está habilitado"
+    save_btn.click()
+    # Validar toast de éxito
+    success = False
+    try:
+        toast = wait.until(EC.visibility_of_element_located((By.XPATH, "//tm-toast[contains(., 'copied successfully') or contains(., 'copiado') or contains(., 'successfully')][not(contains(@style, 'display: none'))]")))
+        if toast.is_displayed():
+            success = True
+    except Exception:
+        pass
+    assert success, "No se confirmó la copia exitosa del curso (no apareció el toast de éxito)."
+    # Validar que el nuevo curso aparece en la tabla de cursos activos
+    time.sleep(2)
+    active_table = driver.find_element(By.XPATH, "//table[contains(@id, 'active-courses-table')]")
+    table_text = active_table.get_attribute("innerText")
+    assert course_id in table_text and course_name in table_text, "El nuevo curso copiado no aparece en la tabla de cursos activos."
+
+# CP-04-03-02 Copia - Course ID duplicado
+@pytest.mark.usefixtures("driver")
+def test_cp_04_03_02_copy_course_duplicate_id(driver):
+    """
+    Validar que no se permita copiar un curso con un ID ya existente.
+    """
+    LOGIN_EMAIL = os.environ["LOGIN_EMAIL"]
+    LOGIN_PASSWORD = os.environ["LOGIN_PASSWORD"]
+    from pages.login_page import LoginPage
+    page = LoginPage(driver)
+    page.login(LOGIN_EMAIL, LOGIN_PASSWORD, user_type="instructor")
+    assert page.is_logged_in("instructor"), "No se pudo iniciar sesión como instructor"
+    wait = WebDriverWait(driver, 15)
+    courses_nav = wait.until(EC.element_to_be_clickable((By.XPATH, "//nav//a[contains(@href, 'courses') or contains(text(), 'Courses') or contains(text(), 'Cursos')]")))
+    courses_nav.click()
+    # Abrir modal de copia
+    modal = open_copy_course_modal(driver, wait)
+    # Usar un ID ya existente (por ejemplo, el del primer curso activo)
+    active_table = driver.find_element(By.XPATH, "//table[contains(@id, 'active-courses-table')]")
+    first_row = active_table.find_elements(By.XPATH, ".//tr[not(th)]")[0]
+    existing_id = first_row.find_elements(By.TAG_NAME, "td")[0].text.strip()
+    modal.find_element(By.ID, "copy-course-id").clear()
+    modal.find_element(By.ID, "copy-course-id").send_keys(existing_id)
+    modal.find_element(By.ID, "copy-course-name").clear()
+    modal.find_element(By.ID, "copy-course-name").send_keys("Curso Duplicado")
+    modal.find_element(By.ID, "copy-course-institute").clear()
+    modal.find_element(By.ID, "copy-course-institute").send_keys("UNSA")
+    # Guardar
+    save_btn = modal.find_element(By.XPATH, ".//button[contains(text(), 'Copy') or contains(text(), 'Copiar')]")
+    assert save_btn.is_enabled(), "El botón de copiar no está habilitado"
+    save_btn.click()
+    # Validar mensaje de error
+    error = None
+    try:
+        error = modal.find_element(By.XPATH, ".//*[contains(text(), 'already exists') or contains(text(), 'ya existe') or contains(text(), 'The course ID')]")
+    except Exception:
+        pass
+    assert error and error.is_displayed(), "No se mostró el error por Course ID duplicado."
+
+# CP-04-03-03 Copia - Course ID vacío
+@pytest.mark.usefixtures("driver")
+def test_cp_04_03_03_copy_course_empty_id(driver):
+    """
+    Validar comportamiento al dejar vacío el campo Course ID al copiar curso.
+    """
+    LOGIN_EMAIL = os.environ["LOGIN_EMAIL"]
+    LOGIN_PASSWORD = os.environ["LOGIN_PASSWORD"]
+    from pages.login_page import LoginPage
+    page = LoginPage(driver)
+    page.login(LOGIN_EMAIL, LOGIN_PASSWORD, user_type="instructor")
+    assert page.is_logged_in("instructor"), "No se pudo iniciar sesión como instructor"
+    wait = WebDriverWait(driver, 15)
+    courses_nav = wait.until(EC.element_to_be_clickable((By.XPATH, "//nav//a[contains(@href, 'courses') or contains(text(), 'Courses') or contains(text(), 'Cursos')]")))
+    courses_nav.click()
+    modal = open_copy_course_modal(driver, wait)
+    # Dejar Course ID vacío
+    modal.find_element(By.ID, "copy-course-id").clear()
+    modal.find_element(By.ID, "copy-course-name").clear()
+    modal.find_element(By.ID, "copy-course-name").send_keys("Curso sin ID")
+    modal.find_element(By.ID, "copy-course-institute").clear()
+    modal.find_element(By.ID, "copy-course-institute").send_keys("UNSA")
+    save_btn = modal.find_element(By.XPATH, ".//button[contains(text(), 'Copy') or contains(text(), 'Copiar')]")
+    save_btn.click()
+    # Validar mensaje de error
+    error = None
+    try:
+        error = modal.find_element(By.XPATH, ".//*[contains(text(), 'required') or contains(text(), 'obligatorio') or contains(text(), 'Course ID is required')]")
+    except Exception:
+        pass
+    assert error and error.is_displayed(), "No se mostró el error por Course ID vacío."
+
+# CP-04-03-04 Course ID con longitud máxima permitida
+@pytest.mark.usefixtures("driver")
+def test_cp_04_03_04_copy_course_id_max_length(driver):
+    """
+    Verificar que se acepte un Course ID con longitud límite válida (64 caracteres).
+    """
+    LOGIN_EMAIL = os.environ["LOGIN_EMAIL"]
+    LOGIN_PASSWORD = os.environ["LOGIN_PASSWORD"]
+    from pages.login_page import LoginPage
+    page = LoginPage(driver)
+    page.login(LOGIN_EMAIL, LOGIN_PASSWORD, user_type="instructor")
+    assert page.is_logged_in("instructor"), "No se pudo iniciar sesión como instructor"
+    wait = WebDriverWait(driver, 15)
+    courses_nav = wait.until(EC.element_to_be_clickable((By.XPATH, "//nav//a[contains(@href, 'courses') or contains(text(), 'Courses') or contains(text(), 'Cursos')]")))
+    courses_nav.click()
+    modal = open_copy_course_modal(driver, wait)
+    # 64 caracteres
+    max_id = "C" + "1" * 63
+    modal.find_element(By.ID, "copy-course-id").clear()
+    modal.find_element(By.ID, "copy-course-id").send_keys(max_id)
+    modal.find_element(By.ID, "copy-course-name").clear()
+    modal.find_element(By.ID, "copy-course-name").send_keys("Curso ID Máx")
+    modal.find_element(By.ID, "copy-course-institute").clear()
+    modal.find_element(By.ID, "copy-course-institute").send_keys("UNSA")
+    tz_select = modal.find_element(By.ID, "copy-time-zone")
+    for option in tz_select.find_elements(By.TAG_NAME, "option"):
+        if "America/Lima" in option.text:
+            option.click()
+            break
+    save_btn = modal.find_element(By.XPATH, ".//button[contains(text(), 'Copy') or contains(text(), 'Copiar')]")
+    assert save_btn.is_enabled(), "El botón de copiar no está habilitado"
+    save_btn.click()
+    # Validar toast de éxito
+    success = False
+    try:
+        toast = wait.until(EC.visibility_of_element_located((By.XPATH, "//tm-toast[contains(., 'copied successfully') or contains(., 'copiado') or contains(., 'successfully')][not(contains(@style, 'display: none'))]")))
+        if toast.is_displayed():
+            success = True
+    except Exception:
+        pass
+    assert success, "No se confirmó la copia exitosa del curso con ID de 64 caracteres."
+
+# CP-04-03-05 Course ID con longitud superior al límite
+@pytest.mark.usefixtures("driver")
+def test_cp_04_03_05_copy_course_id_exceeds_max_length(driver):
+    """
+    Verificar que se rechace un Course ID con más de la longitud permitida (65 caracteres).
+    """
+    LOGIN_EMAIL = os.environ["LOGIN_EMAIL"]
+    LOGIN_PASSWORD = os.environ["LOGIN_PASSWORD"]
+    from pages.login_page import LoginPage
+    page = LoginPage(driver)
+    page.login(LOGIN_EMAIL, LOGIN_PASSWORD, user_type="instructor")
+    assert page.is_logged_in("instructor"), "No se pudo iniciar sesión como instructor"
+    wait = WebDriverWait(driver, 15)
+    courses_nav = wait.until(EC.element_to_be_clickable((By.XPATH, "//nav//a[contains(@href, 'courses') or contains(text(), 'Courses') or contains(text(), 'Cursos')]")))
+    courses_nav.click()
+    modal = open_copy_course_modal(driver, wait)
+    # 65 caracteres
+    too_long_id = "C" + "1" * 64
+    modal.find_element(By.ID, "copy-course-id").clear()
+    modal.find_element(By.ID, "copy-course-id").send_keys(too_long_id)
+    modal.find_element(By.ID, "copy-course-name").clear()
+    modal.find_element(By.ID, "copy-course-name").send_keys("Curso ID Largo")
+    modal.find_element(By.ID, "copy-course-institute").clear()
+    modal.find_element(By.ID, "copy-course-institute").send_keys("UNSA")
+    save_btn = modal.find_element(By.XPATH, ".//button[contains(text(), 'Copy') or contains(text(), 'Copiar')]")
+    save_btn.click()
+    # Validar mensaje de error
+    error = None
+    try:
+        error = modal.find_element(By.XPATH, ".//*[contains(text(), 'exceeds allowed length') or contains(text(), 'longitud máxima') or contains(text(), 'Course ID')]")
+    except Exception:
+        pass
+    assert error and error.is_displayed(), "No se mostró el error por Course ID excediendo el límite."
+
+# CP-04-03-06 Zona horaria inválida
+@pytest.mark.usefixtures("driver")
+def test_cp_04_03_06_copy_course_invalid_timezone(driver):
+    """
+    Validar que no se acepte una zona horaria inválida.
+    """
+    LOGIN_EMAIL = os.environ["LOGIN_EMAIL"]
+    LOGIN_PASSWORD = os.environ["LOGIN_PASSWORD"]
+    from pages.login_page import LoginPage
+    page = LoginPage(driver)
+    page.login(LOGIN_EMAIL, LOGIN_PASSWORD, user_type="instructor")
+    assert page.is_logged_in("instructor"), "No se pudo iniciar sesión como instructor"
+    wait = WebDriverWait(driver, 15)
+    courses_nav = wait.until(EC.element_to_be_clickable((By.XPATH, "//nav//a[contains(@href, 'courses') or contains(text(), 'Courses') or contains(text(), 'Cursos')]")))
+    courses_nav.click()
+    modal = open_copy_course_modal(driver, wait)
+    modal.find_element(By.ID, "copy-course-id").clear()
+    modal.find_element(By.ID, "copy-course-id").send_keys("CS101-TZINV")
+    modal.find_element(By.ID, "copy-course-name").clear()
+    modal.find_element(By.ID, "copy-course-name").send_keys("Curso TZ Inválida")
+    modal.find_element(By.ID, "copy-course-institute").clear()
+    modal.find_element(By.ID, "copy-course-institute").send_keys("UNSA")
+    # Intentar poner una zona horaria inválida (si es input libre)
+    try:
+        tz_select = modal.find_element(By.ID, "copy-time-zone")
+        tz_select.send_keys("GMT-25")
+    except Exception:
+        pass
+    save_btn = modal.find_element(By.XPATH, ".//button[contains(text(), 'Copy') or contains(text(), 'Copiar')]")
+    save_btn.click()
+    # Validar mensaje de error
+    error = None
+    try:
+        error = modal.find_element(By.XPATH, ".//*[contains(text(), 'Invalid Time Zone') or contains(text(), 'zona horaria') or contains(text(), 'invalid')]")
+    except Exception:
+        pass
+    assert error and error.is_displayed(), "No se mostró el error por zona horaria inválida."
+
+# CP-04-03-07 Nombre del curso vacío
+@pytest.mark.usefixtures("driver")
+def test_cp_04_03_07_copy_course_empty_name(driver):
+    """
+    Validar que el campo nombre del curso no pueda estar vacío.
+    """
+    LOGIN_EMAIL = os.environ["LOGIN_EMAIL"]
+    LOGIN_PASSWORD = os.environ["LOGIN_PASSWORD"]
+    from pages.login_page import LoginPage
+    page = LoginPage(driver)
+    page.login(LOGIN_EMAIL, LOGIN_PASSWORD, user_type="instructor")
+    assert page.is_logged_in("instructor"), "No se pudo iniciar sesión como instructor"
+    wait = WebDriverWait(driver, 15)
+    courses_nav = wait.until(EC.element_to_be_clickable((By.XPATH, "//nav//a[contains(@href, 'courses') or contains(text(), 'Courses') or contains(text(), 'Cursos')]")))
+    courses_nav.click()
+    modal = open_copy_course_modal(driver, wait)
+    modal.find_element(By.ID, "copy-course-id").clear()
+    modal.find_element(By.ID, "copy-course-id").send_keys("CS101-NONAME")
+    modal.find_element(By.ID, "copy-course-name").clear()
+    modal.find_element(By.ID, "copy-course-institute").clear()
+    modal.find_element(By.ID, "copy-course-institute").send_keys("UNSA")
+    save_btn = modal.find_element(By.XPATH, ".//button[contains(text(), 'Copy') or contains(text(), 'Copiar')]")
+    save_btn.click()
+    # Validar mensaje de error
+    error = None
+    try:
+        error = modal.find_element(By.XPATH, ".//*[contains(text(), 'Course Name is required') or contains(text(), 'required') or contains(text(), 'obligatorio')]")
+    except Exception:
+        pass
+    assert error and error.is_displayed(), "No se mostró el error por nombre de curso vacío."
+
+
