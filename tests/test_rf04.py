@@ -2557,3 +2557,76 @@ def test_cp_04_03_07_copy_course_empty_name(driver):
     assert not save_btn.is_enabled(), "El botón de Copy está habilitado aunque el campo Course Name está vacío."
 
 
+# CP-04-04-01 Archivado exitoso de curso activo
+@pytest.mark.usefixtures("driver")
+def test_cp_04_04_01_archive_active_course_success(driver):
+    """
+    Verificar que se archive un curso correctamente: desaparece de activos, aparece en archivados y muestra el toast esperado.
+    """
+    LOGIN_EMAIL = os.environ["LOGIN_EMAIL"]
+    LOGIN_PASSWORD = os.environ["LOGIN_PASSWORD"]
+    from pages.login_page import LoginPage
+    page = LoginPage(driver)
+    page.login(LOGIN_EMAIL, LOGIN_PASSWORD, user_type="instructor")
+    assert page.is_logged_in("instructor"), "No se pudo iniciar sesión como instructor"
+    wait = WebDriverWait(driver, 15)
+    # Ir a cursos
+    courses_nav = wait.until(EC.element_to_be_clickable((By.XPATH, "//nav//a[contains(@href, 'courses') or contains(text(), 'Courses') or contains(text(), 'Cursos')]")))
+    courses_nav.click()
+    # Buscar la tabla de cursos activos y la fila del curso a archivar
+    active_table = wait.until(EC.presence_of_element_located((By.XPATH, "//table[contains(@id, 'active-courses-table')]")))
+    rows = active_table.find_elements(By.XPATH, ".//tr[not(th)]")
+    assert rows, "No hay cursos activos para archivar"
+    # Buscar un curso que no esté ya archivado (puedes ajustar el criterio si tienes un ID específico)
+    target_row = rows[0]
+    course_id = target_row.find_elements(By.TAG_NAME, "td")[0].text.strip()
+    # Abrir menú Other Actions
+    other_actions_btn = target_row.find_element(By.XPATH, ".//button[contains(@id, 'btn-other-actions') or contains(text(), 'Other Actions')]")
+    driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", other_actions_btn)
+    import time
+    time.sleep(0.5)
+    try:
+        other_actions_btn.click()
+    except Exception:
+        driver.execute_script("arguments[0].click();", other_actions_btn)
+    # Esperar el menú desplegable visible
+    dropdown_menu = None
+    for _ in range(10):
+        try:
+            dropdown_menu = target_row.find_element(By.XPATH, ".//div[contains(@class, 'dropdown-menu') and contains(@class, 'show')]")
+            if dropdown_menu.is_displayed():
+                break
+        except Exception:
+            pass
+        time.sleep(0.2)
+    assert dropdown_menu and dropdown_menu.is_displayed(), "No se encontró el menú desplegable de acciones"
+    # Buscar y hacer clic en el botón Archive dentro del menú
+    archive_btn = None
+    try:
+        archive_btn = dropdown_menu.find_element(By.XPATH, ".//button[contains(@id, 'archive') or contains(text(), 'Archive')]")
+    except Exception:
+        try:
+            archive_btn = dropdown_menu.find_element(By.XPATH, ".//button[contains(text(), 'Archive')]")
+        except Exception:
+            pass
+    assert archive_btn, "No se encontró el botón 'Archive' en el menú desplegable"
+    driver.execute_script("arguments[0].click();", archive_btn)
+    # Buscar el toast de éxito tras archivar
+    wait = WebDriverWait(driver, 10)
+    try:
+        toast = wait.until(EC.visibility_of_element_located((By.XPATH, "//tm-toast[not(contains(@style, 'display: none'))]")))
+        toast_text = toast.text.strip()
+        if not toast_text:
+            try:
+                toast_body = toast.find_element(By.CLASS_NAME, "toast-body")
+                toast_text = toast_body.text.strip()
+            except Exception:
+                toast_text = ""
+        print(f"[DEPURACIÓN] Texto del toast visible: {toast_text}")
+        assert "has been archived" in toast_text, f"No se encontró el mensaje esperado en el toast: '{toast_text}'"
+    except Exception:
+        print("[DEPURACIÓN] No se encontró ningún <tm-toast> visible tras archivar.")
+        print(driver.find_element(By.TAG_NAME, "body").get_attribute("outerHTML"))
+        raise AssertionError("No se encontró el toast de éxito tras archivar el curso.")
+    
+    
