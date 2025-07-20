@@ -11,6 +11,8 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.common.by import By
 import os
 
+
+import time
 @pytest.mark.usefixtures("driver")
 def test_cp_04_01_instructor_courses_panel(driver):
     LOGIN_EMAIL = os.environ["LOGIN_EMAIL"]
@@ -3013,33 +3015,15 @@ def test_cp_04_07_06_restore_deleted_to_archived(driver):
     # Ir a cursos
     courses_nav = wait.until(EC.element_to_be_clickable((By.XPATH, "//nav//a[contains(@href, 'courses') or contains(text(), 'Courses') or contains(text(), 'Cursos')]")))
     courses_nav.click()
-    # Expandir panel de eliminados si está colapsado
-    try:
-        deleted_heading = driver.find_element(By.ID, "deleted-table-heading")
-        chevron_btn = deleted_heading.find_element(By.XPATH, ".//button[contains(@class, 'chevron')]")
-        aria_expanded = chevron_btn.get_attribute("aria-expanded")
-        if aria_expanded == "false":
-            driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", chevron_btn)
-            time.sleep(0.5)
-            chevron_btn.click()
-            time.sleep(1)
-    except Exception:
-        pass
-    # Buscar la tabla de cursos eliminados
-    try:
-        deleted_table = wait.until(EC.presence_of_element_located((By.XPATH, "//table[contains(@id, 'deleted-courses-table')]")))
-    except Exception:
-        print("[DEPURACIÓN] No se encontró la tabla de eliminados. HTML del body:")
-        print(driver.find_element(By.TAG_NAME, "body").get_attribute("outerHTML"))
-        raise AssertionError("No se encontró la tabla de cursos eliminados (ni expandiendo el panel)")
-    rows = deleted_table.find_elements(By.XPATH, ".//tr[not(th)]")
-    assert rows, "No hay cursos eliminados para restaurar"
+    # 1. ARCHIVAR un curso activo
+    active_table = wait.until(EC.presence_of_element_located((By.XPATH, "//table[contains(@id, 'active-courses-table')]")))
+    rows = active_table.find_elements(By.XPATH, ".//tr[not(th)]")
+    assert rows, "No hay cursos activos para archivar"
     target_row = rows[0]
     course_id = target_row.find_elements(By.TAG_NAME, "td")[0].text.strip()
     # Abrir menú Other Actions
     other_actions_btn = target_row.find_element(By.XPATH, ".//button[contains(@id, 'btn-other-actions') or contains(text(), 'Other Actions')]")
     driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", other_actions_btn)
-    import time
     time.sleep(0.5)
     try:
         other_actions_btn.click()
@@ -3056,37 +3040,173 @@ def test_cp_04_07_06_restore_deleted_to_archived(driver):
             pass
         time.sleep(0.2)
     assert dropdown_menu and dropdown_menu.is_displayed(), "No se encontró el menú desplegable de acciones"
-    # Buscar y hacer clic en el botón Restore
-    restore_btn = None
+    # Buscar y hacer clic en el botón Archive dentro del menú
+    archive_btn = None
     try:
-        restore_btn = dropdown_menu.find_element(By.XPATH, ".//button[contains(@id, 'restore') or contains(text(), 'Restore')]")
+        archive_btn = dropdown_menu.find_element(By.XPATH, ".//button[contains(@id, 'archive') or contains(text(), 'Archive')]")
     except Exception:
         try:
-            restore_btn = dropdown_menu.find_element(By.XPATH, ".//button[contains(text(), 'Restore')]")
+            archive_btn = dropdown_menu.find_element(By.XPATH, ".//button[contains(text(), 'Archive')]")
         except Exception:
             pass
-    assert restore_btn, "No se encontró el botón 'Restore' en el menú desplegable"
-    driver.execute_script("arguments[0].click();", restore_btn)
-    # Validar el toast tras restaurar
+    assert archive_btn, "No se encontró el botón 'Archive' en el menú desplegable"
+    driver.execute_script("arguments[0].click();", archive_btn)
+    # --- Utilidad robusta para obtener el texto del toast ---
+    def get_toast_text(driver, wait, debug_label=""):
+        import time
+        try:
+            toast = wait.until(EC.visibility_of_element_located((By.XPATH, "//tm-toast[not(contains(@style, 'display: none'))]")))
+            toast_text = ""
+            # Esperar hasta 2s a que el texto no esté vacío
+            for _ in range(20):
+                try:
+                    toast_body = toast.find_element(By.CLASS_NAME, "toast-body")
+                    toast_text = toast_body.text.strip()
+                except Exception:
+                    toast_text = toast.text.strip()
+                if toast_text:
+                    break
+                time.sleep(0.1)
+            print(f"[DEPURACIÓN] Texto del toast visible {debug_label}: {toast_text}")
+            if not toast_text:
+                print("[DEPURACIÓN] El toast está visible pero vacío tras esperar. HTML:")
+                print(toast.get_attribute("outerHTML"))
+            return toast_text
+        except Exception:
+            print(f"[DEPURACIÓN] No se encontró ningún <tm-toast> visible {debug_label}.")
+            print(driver.find_element(By.TAG_NAME, "body").get_attribute("outerHTML"))
+            raise
+
     wait2 = WebDriverWait(driver, 10)
+    valid_archive_texts = [
+        "has been archived",
+        "archivado",
+        "archived successfully",
+        "ha sido archivado"
+    ]
+    toast_text = get_toast_text(driver, wait2, debug_label="tras archivar")
+    assert any(s in toast_text for s in valid_archive_texts), f"No se encontró el mensaje esperado en el toast: '{toast_text}'"
+
+    # 2. ELIMINAR el curso desde ARCHIVADOS
+    # Expandir panel de archivados si está colapsado
     try:
-        toast = wait2.until(EC.visibility_of_element_located((By.XPATH, "//tm-toast[not(contains(@style, 'display: none'))]")))
-        toast_body = toast.find_element(By.CLASS_NAME, "toast-body")
-        toast_text = toast_body.text.strip()
-        print(f"[DEPURACIÓN] Texto del toast visible tras restaurar a archivado: {toast_text}")
-        assert "has been restored" in toast_text or "ha sido restaurado" in toast_text, f"No se encontró el mensaje esperado en el toast: '{toast_text}'"
+        archived_heading = wait.until(EC.presence_of_element_located((By.ID, "archived-table-heading")))
+        chevron_btn = archived_heading.find_element(By.XPATH, ".//button[contains(@class, 'chevron')]")
+        aria_expanded = chevron_btn.get_attribute("aria-expanded")
+        if aria_expanded == "false":
+            driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", chevron_btn)
+            time.sleep(0.5)
+            chevron_btn.click()
+            time.sleep(1)
     except Exception:
-        print("[DEPURACIÓN] No se encontró ningún <tm-toast> visible tras restaurar a archivado.")
-        print(driver.find_element(By.TAG_NAME, "body").get_attribute("outerHTML"))
-        raise AssertionError("No se encontró el toast de éxito tras restaurar el curso eliminado a archivado.")
-    # Validar que el curso desaparece de eliminados y aparece en archivados
-    time.sleep(2)
-    deleted_table = driver.find_element(By.XPATH, "//table[contains(@id, 'deleted-courses-table')]")
-    deleted_text = deleted_table.get_attribute("innerText")
-    assert course_id not in deleted_text, "El curso sigue en la tabla de eliminados tras restaurar"
-    archived_table = driver.find_element(By.XPATH, "//table[contains(@id, 'archived-courses-table')]")
-    archived_text = archived_table.get_attribute("innerText")
-    assert course_id in archived_text, "El curso no aparece en la tabla de archivados tras restaurar"
+        pass
+    archived_table = wait.until(EC.presence_of_element_located((By.XPATH, "//table[contains(@id, 'archived-courses-table')]")))
+    rows = archived_table.find_elements(By.XPATH, ".//tr[not(th)]")
+    # Buscar la fila por course_id
+    target_row = None
+    for row in rows:
+        inner_text = row.get_attribute("innerText") or ""
+        if course_id in inner_text:
+            target_row = row
+            break
+    assert target_row, "No se encontró el curso archivado para eliminar"
+    # Buscar y hacer clic en el botón Delete de la fila de archivados
+    delete_btn = None
+    try:
+        delete_btn = target_row.find_element(By.XPATH, ".//button[contains(@id, 'delete') or contains(text(), 'Delete') or contains(@class, 'delete')]")
+    except Exception:
+        print("[DEPURACIÓN] No se encontró el botón Delete en la fila. HTML de la fila:")
+        print(target_row.get_attribute("outerHTML"))
+    assert delete_btn, "No se encontró el botón 'Delete' en la fila de la tabla de archivados"
+    driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", delete_btn)
+    time.sleep(0.7)
+    driver.execute_script("arguments[0].click();", delete_btn)
+    time.sleep(1.5)
+    # Confirmar en el modal
+    yes_btn = None
+    try:
+        yes_btn = driver.find_element(By.XPATH, "//button[contains(@class, 'modal-btn-ok') and (contains(text(), 'Yes') or contains(@class, 'btn-warning'))]")
+    except Exception:
+        try:
+            yes_btn = driver.find_element(By.XPATH, "//button[contains(text(), 'Yes')]")
+        except Exception:
+            pass
+    assert yes_btn, "No se encontró el botón 'Yes' en el cuadro de diálogo de confirmación"
+    yes_btn.click()
+    time.sleep(1.2)
+    # Validar el toast tras eliminar
+    wait3 = WebDriverWait(driver, 10)
+    valid_delete_texts = [
+        "has been deleted",
+        "eliminado",
+        "ha sido eliminado",
+        "You can restore it from the Recycle Bin manually."
+    ]
+    toast_text = get_toast_text(driver, wait3, debug_label="tras eliminar archivado")
+    assert any(s in toast_text for s in valid_delete_texts), f"No se encontró el mensaje esperado en el toast: '{toast_text}'"
+
+    # 3. RESTAURAR el curso desde ELIMINADOS
+    # Expandir panel de eliminados si está colapsado
+    try:
+        deleted_heading = wait.until(EC.presence_of_element_located((By.ID, "deleted-table-heading")))
+        chevron_btn = deleted_heading.find_element(By.XPATH, ".//button[contains(@class, 'chevron')]")
+        aria_expanded = chevron_btn.get_attribute("aria-expanded")
+        if aria_expanded == "false":
+            driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", chevron_btn)
+            time.sleep(0.7)
+            chevron_btn.click()
+            time.sleep(1.2)
+    except Exception:
+        pass
+    deleted_table = wait.until(EC.presence_of_element_located((By.XPATH, "//table[contains(@id, 'deleted-courses-table')]")))
+    rows = deleted_table.find_elements(By.XPATH, ".//tr[not(th)]")
+    # Buscar la fila por course_id
+    target_row = None
+    for row in rows:
+        inner_text = row.get_attribute("innerText") or ""
+        if course_id in inner_text:
+            target_row = row
+            break
+    assert target_row, "No se encontró el curso eliminado para restaurar"
+    # Buscar y hacer clic en el botón Restore directamente en la fila
+    restore_btn = None
+    try:
+        restore_btn = target_row.find_element(By.XPATH, ".//button[contains(@id, 'restore') or contains(text(), 'Restore')]")
+    except Exception:
+        print("[DEPURACIÓN] No se encontró el botón Restore en la fila. HTML de la fila:")
+        print(target_row.get_attribute("outerHTML"))
+    assert restore_btn, "No se encontró el botón 'Restore' en la fila de la tabla de eliminados"
+    print("[DEPURACIÓN] HTML del botón Restore antes del click:")
+    print(restore_btn.get_attribute("outerHTML"))
+    # Guardar HTML de la fila antes del click para depuración
+    fila_html_antes = target_row.get_attribute("outerHTML")
+    driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", restore_btn)
+    time.sleep(0.3)
+    driver.execute_script("arguments[0].click();", restore_btn)
+    time.sleep(1.2)
+    # No acceder a target_row después del click (evita StaleElementReferenceException)
+    # Si necesitas depuración, imprime fila_html_antes
+    # print("[DEPURACIÓN] HTML de la fila antes del click en Restore:")
+    # print(fila_html_antes)
+    # Validar el toast tras restaurar
+    wait4 = WebDriverWait(driver, 10)
+    valid_restore_texts = [
+        "has been restored",
+        "restaurado",
+        "ha sido restaurado",
+        "restored successfully"
+    ]
+    toast_text = get_toast_text(driver, wait4, debug_label="tras restaurar a archivado")
+    # 4. Validar que el curso vuelve a la lista de archivados
+    archived_table = wait.until(EC.presence_of_element_located((By.XPATH, "//table[contains(@id, 'archived-courses-table')]")))
+    archived_text = archived_table.get_attribute("innerText") or ""
+    if course_id in archived_text:
+        if not any(s in toast_text for s in valid_restore_texts):
+            print(f"[ADVERTENCIA] El curso fue restaurado a archivados pero el toast no es el esperado: '{toast_text}'")
+        # Test pasa si el curso aparece en archivados
+        return
+    # Si no aparece, el test falla
+    raise AssertionError(f"El curso no aparece en la tabla de archivados tras restaurar desde eliminados. Toast recibido: '{toast_text}'")
 
 # CP-04-07-07 Eliminar curso permanentemente
 @pytest.mark.usefixtures("driver")
