@@ -2283,42 +2283,43 @@ def test_cp_04_03_02_copy_course_duplicate_id(driver):
     except Exception:
         pass
     if not (error and error.is_displayed()):
-        # Si no hay error en el modal, buscar toast de error (robusto: siempre buscar en .toast-body)
+        # Si no hay error en el modal, buscar toast de error (solo pasa si el texto es exactamente el esperado)
+        import time
         try:
             wait = WebDriverWait(driver, 5)
             toast = wait.until(EC.visibility_of_element_located((By.XPATH, "//tm-toast[not(contains(@style, 'display: none'))]")))
             # Siempre buscar el texto en .toast-body si existe
-            toast_text = toast.text.strip()
+            toast_text = ""
+            try:
+                toast_body = toast.find_element(By.CLASS_NAME, "toast-body")
+                toast_text = toast_body.text.strip()
+            except Exception:
+                toast_text = toast.text.strip()
+            # Si sigue vacío, esperar y reintentar una vez
             if not toast_text:
+                time.sleep(0.5)
                 try:
                     toast_body = toast.find_element(By.CLASS_NAME, "toast-body")
                     toast_text = toast_body.text.strip()
                 except Exception:
-                    toast_text = ""
-            else:
-                # Si el texto principal existe pero .toast-body también, preferir el de .toast-body si no es vacío
-                try:
-                    toast_body = toast.find_element(By.CLASS_NAME, "toast-body")
-                    if toast_body.text.strip():
-                        toast_text = toast_body.text.strip()
-                except Exception:
-                    pass
+                    toast_text = toast.text.strip()
             print("[DEPURACIÓN] Texto del toast visible tras error (ID duplicado):", toast_text)
-            valid_error_texts = [
-                "already exists", "ya existe", "the course id", "duplicado", "id duplicado",
-                f"the course id {existing_id.lower()} already exists."
-            ]
-            toast_text_lower = toast_text.lower()
-            if not any(s in toast_text_lower for s in valid_error_texts):
+            expected_text = f"The course ID {existing_id} already exists."
+            if toast_text.strip() != expected_text:
+                print(f"[DEPURACIÓN] El texto del toast no coincide exactamente. Esperado: '{expected_text}' | Obtenido: '{toast_text}'")
                 print("[DEPURACIÓN] HTML del toast:")
                 print(toast.get_attribute("outerHTML"))
-            assert any(s in toast_text_lower for s in valid_error_texts), f"El toast de error no contiene mensaje esperado: {toast_text}"
+            assert toast_text.strip() == expected_text, f"El toast de error no coincide exactamente. Esperado: '{expected_text}' | Obtenido: '{toast_text}'"
         except Exception:
             print("[DEPURACIÓN] No se encontró el error esperado (ID duplicado). HTML del body:")
             print(driver.find_element(By.TAG_NAME, "body").get_attribute("outerHTML"))
             toasts = driver.find_elements(By.XPATH, "//tm-toast[not(contains(@style, 'display: none'))]")
             for idx, t in enumerate(toasts):
                 print(f"Toast visible {idx}: {t.text}")
+                try:
+                    print(f"Toast {idx} outerHTML: {t.get_attribute('outerHTML')}")
+                except Exception:
+                    pass
             raise AssertionError("No se mostró el error por Course ID duplicado (ni en modal ni en toast).")
     else:
         assert error.is_displayed(), "No se mostró el error por Course ID duplicado."
