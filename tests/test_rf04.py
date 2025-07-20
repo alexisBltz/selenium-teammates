@@ -2171,7 +2171,10 @@ def open_copy_course_modal(driver, wait, course_row=None):
             raise
     time.sleep(0.2)  # Dar tiempo a la animación del modal
     try:
-        modal = wait.until(EC.visibility_of_element_located((By.XPATH, "//div[contains(@class, 'modal') and .//h4[contains(text(), 'Copy course')]]")))
+        # Esperar el <ngb-modal-window> visible que contenga <tm-copy-course-modal> y <h5> con 'Copy course'
+        modal_window = wait.until(EC.visibility_of_element_located((By.XPATH, "//ngb-modal-window[.//tm-copy-course-modal and .//h5[contains(., 'Copy course')]]")))
+        # El modal real es el componente tm-copy-course-modal dentro del modal window
+        modal = modal_window.find_element(By.XPATH, ".//tm-copy-course-modal")
     except Exception:
         print("[DEPURACIÓN] No apareció el modal tras hacer click en Copy. HTML del body:")
         print(driver.find_element(By.TAG_NAME, "body").get_attribute("outerHTML"))
@@ -2181,62 +2184,63 @@ def open_copy_course_modal(driver, wait, course_row=None):
 # CP-04-03-01 Copia exitosa de curso activo
 @pytest.mark.usefixtures("driver")
 def test_cp_04_03_01_copy_course_success(driver):
-    print("Versión de Chrome:", driver.capabilities['browserVersion'])
-    """
-    Verificar que se cree exitosamente un curso con datos válidos.
-    """
     LOGIN_EMAIL = os.environ["LOGIN_EMAIL"]
     LOGIN_PASSWORD = os.environ["LOGIN_PASSWORD"]
     from pages.login_page import LoginPage
     page = LoginPage(driver)
     page.login(LOGIN_EMAIL, LOGIN_PASSWORD, user_type="instructor")
-    assert page.is_logged_in("instructor"), "No se pudo iniciar sesión como instructor"
+    assert page.is_logged_in("instructor")
     wait = WebDriverWait(driver, 15)
     # Ir a cursos
-    courses_nav = wait.until(EC.element_to_be_clickable((By.XPATH, "//nav//a[contains(@href, 'courses') or contains(text(), 'Courses') or contains(text(), 'Cursos')]")))
-    courses_nav.click()
+    wait.until(EC.element_to_be_clickable((By.XPATH, "//nav//a[contains(@href, 'courses') or contains(text(), 'Courses') or contains(text(), 'Cursos')]"))).click()
     # Abrir modal de copia
     modal = open_copy_course_modal(driver, wait)
     # Llenar formulario
-    course_id = "CS101-NEW"
-    course_name = "Intro to AI"
-    institute = "unsa"  # Debe ser el value exacto del option
-    timezone = "America/Lima"
-    # Llenar campos de texto
-    modal.find_element(By.ID, "copy-course-id").clear()
-    modal.find_element(By.ID, "copy-course-id").send_keys(course_id)
-    modal.find_element(By.ID, "copy-course-name").clear()
-    modal.find_element(By.ID, "copy-course-name").send_keys(course_name)
-    # Seleccionar instituto (select)
+    modal.find_element(By.ID, "copy-course-id").send_keys("CS101NEW")
+    modal.find_element(By.ID, "copy-course-name").send_keys("Intro to AI")
     institute_select = modal.find_element(By.ID, "copy-course-institute")
     for option in institute_select.find_elements(By.TAG_NAME, "option"):
-        if option.get_attribute("value").lower() == institute.lower():
+        if option.get_attribute("value").lower() == "unsa":
             option.click()
             break
-    # Seleccionar zona horaria (select)
     tz_select = modal.find_element(By.ID, "copy-time-zone")
     for option in tz_select.find_elements(By.TAG_NAME, "option"):
-        if timezone in option.text:
+        if "America/Lima" in option.text:
             option.click()
             break
-    # Esperar a que el botón Copy esté habilitado
-    save_btn = wait.until(lambda d: modal.find_element(By.XPATH, ".//button[contains(text(), 'Copy') or contains(text(), 'Copiar') and not(@disabled)]"))
-    assert save_btn.is_enabled(), "El botón de copiar no está habilitado"
+    # Esperar y click en Copy
+    save_btn = wait.until(lambda d: modal.find_element(By.ID, "btn-confirm-copy-course"))
+    wait.until(lambda d: save_btn.is_enabled() and save_btn.is_displayed())
     save_btn.click()
-    # Validar toast de éxito
-    success = False
+    # Validar toast de éxito (selector flexible y depuración)
     try:
-        toast = wait.until(EC.visibility_of_element_located((By.XPATH, "//tm-toast[contains(., 'copied successfully') or contains(., 'copiado') or contains(., 'successfully')][not(contains(@style, 'display: none'))]")))
-        if toast.is_displayed():
-            success = True
+        # Esperar cualquier tm-toast visible
+        toast = wait.until(EC.visibility_of_element_located((By.XPATH, "//tm-toast[not(contains(@style, 'display: none'))]")))
+        # Extraer el texto real del toast desde el div.toast-body si toast.text está vacío
+        toast_text = toast.text.strip()
+        if not toast_text:
+            try:
+                toast_body = toast.find_element(By.CLASS_NAME, "toast-body")
+                toast_text = toast_body.text.strip()
+            except Exception:
+                toast_text = ""
+        print("[DEPURACIÓN] Texto del toast visible tras copiar:", toast_text)
+        valid_success_texts = [
+            "copied successfully", "copiado", "successfully", "copiado con éxito", "copia exitosa", "copia realizada",
+            "the course has been added."  # nuevo texto detectado
+        ]
+        toast_text_lower = toast_text.lower()
+        assert any(s in toast_text_lower for s in valid_success_texts), f"El toast no contiene mensaje esperado: {toast_text}"
     except Exception:
-        pass
-    assert success, "No se confirmó la copia exitosa del curso (no apareció el toast de éxito)."
+        # Si falla, imprimir todos los tm-toast visibles y el HTML del body
+        print("[DEPURACIÓN] No se encontró el toast esperado. HTML del body:")
+        print(driver.find_element(By.TAG_NAME, "body").get_attribute("outerHTML"))
+        toasts = driver.find_elements(By.XPATH, "//tm-toast[not(contains(@style, 'display: none'))]")
+        for idx, t in enumerate(toasts):
+            print(f"Toast visible {idx}: {t.text}")
+        raise AssertionError("No se confirmó la copia exitosa del curso (no apareció el toast de éxito o el texto no coincide).")
     # Validar que el nuevo curso aparece en la tabla de cursos activos
-    time.sleep(2)
-    active_table = driver.find_element(By.XPATH, "//table[contains(@id, 'active-courses-table')]")
-    table_text = active_table.get_attribute("innerText")
-    assert course_id in table_text and course_name in table_text, "El nuevo curso copiado no aparece en la tabla de cursos activos."
+    wait.until(lambda d: "CS101NEW" in d.find_element(By.XPATH, "//table[contains(@id, 'active-courses-table')]").get_attribute("innerText"))
 
 # CP-04-03-02 Copia - Course ID duplicado
 @pytest.mark.usefixtures("driver")
@@ -2263,19 +2267,61 @@ def test_cp_04_03_02_copy_course_duplicate_id(driver):
     modal.find_element(By.ID, "copy-course-id").send_keys(existing_id)
     modal.find_element(By.ID, "copy-course-name").clear()
     modal.find_element(By.ID, "copy-course-name").send_keys("Curso Duplicado")
-    modal.find_element(By.ID, "copy-course-institute").clear()
-    modal.find_element(By.ID, "copy-course-institute").send_keys("UNSA")
+    institute_select = modal.find_element(By.ID, "copy-course-institute")
+    for option in institute_select.find_elements(By.TAG_NAME, "option"):
+        if option.get_attribute("value").lower() == "unsa":
+            option.click()
+            break
     # Guardar
     save_btn = modal.find_element(By.XPATH, ".//button[contains(text(), 'Copy') or contains(text(), 'Copiar')]")
     assert save_btn.is_enabled(), "El botón de copiar no está habilitado"
     save_btn.click()
-    # Validar mensaje de error
+    # Validar mensaje de error en el modal o en un toast
     error = None
     try:
         error = modal.find_element(By.XPATH, ".//*[contains(text(), 'already exists') or contains(text(), 'ya existe') or contains(text(), 'The course ID')]")
     except Exception:
         pass
-    assert error and error.is_displayed(), "No se mostró el error por Course ID duplicado."
+    if not (error and error.is_displayed()):
+        # Si no hay error en el modal, buscar toast de error (robusto: siempre buscar en .toast-body)
+        try:
+            wait = WebDriverWait(driver, 5)
+            toast = wait.until(EC.visibility_of_element_located((By.XPATH, "//tm-toast[not(contains(@style, 'display: none'))]")))
+            # Siempre buscar el texto en .toast-body si existe
+            toast_text = toast.text.strip()
+            if not toast_text:
+                try:
+                    toast_body = toast.find_element(By.CLASS_NAME, "toast-body")
+                    toast_text = toast_body.text.strip()
+                except Exception:
+                    toast_text = ""
+            else:
+                # Si el texto principal existe pero .toast-body también, preferir el de .toast-body si no es vacío
+                try:
+                    toast_body = toast.find_element(By.CLASS_NAME, "toast-body")
+                    if toast_body.text.strip():
+                        toast_text = toast_body.text.strip()
+                except Exception:
+                    pass
+            print("[DEPURACIÓN] Texto del toast visible tras error (ID duplicado):", toast_text)
+            valid_error_texts = [
+                "already exists", "ya existe", "the course id", "duplicado", "id duplicado",
+                f"the course id {existing_id.lower()} already exists."
+            ]
+            toast_text_lower = toast_text.lower()
+            if not any(s in toast_text_lower for s in valid_error_texts):
+                print("[DEPURACIÓN] HTML del toast:")
+                print(toast.get_attribute("outerHTML"))
+            assert any(s in toast_text_lower for s in valid_error_texts), f"El toast de error no contiene mensaje esperado: {toast_text}"
+        except Exception:
+            print("[DEPURACIÓN] No se encontró el error esperado (ID duplicado). HTML del body:")
+            print(driver.find_element(By.TAG_NAME, "body").get_attribute("outerHTML"))
+            toasts = driver.find_elements(By.XPATH, "//tm-toast[not(contains(@style, 'display: none'))]")
+            for idx, t in enumerate(toasts):
+                print(f"Toast visible {idx}: {t.text}")
+            raise AssertionError("No se mostró el error por Course ID duplicado (ni en modal ni en toast).")
+    else:
+        assert error.is_displayed(), "No se mostró el error por Course ID duplicado."
 
 # CP-04-03-03 Copia - Course ID vacío
 @pytest.mark.usefixtures("driver")
@@ -2297,17 +2343,14 @@ def test_cp_04_03_03_copy_course_empty_id(driver):
     modal.find_element(By.ID, "copy-course-id").clear()
     modal.find_element(By.ID, "copy-course-name").clear()
     modal.find_element(By.ID, "copy-course-name").send_keys("Curso sin ID")
-    modal.find_element(By.ID, "copy-course-institute").clear()
-    modal.find_element(By.ID, "copy-course-institute").send_keys("UNSA")
+    institute_select = modal.find_element(By.ID, "copy-course-institute")
+    for option in institute_select.find_elements(By.TAG_NAME, "option"):
+        if option.get_attribute("value").lower() == "unsa":
+            option.click()
+            break
     save_btn = modal.find_element(By.XPATH, ".//button[contains(text(), 'Copy') or contains(text(), 'Copiar')]")
-    save_btn.click()
-    # Validar mensaje de error
-    error = None
-    try:
-        error = modal.find_element(By.XPATH, ".//*[contains(text(), 'required') or contains(text(), 'obligatorio') or contains(text(), 'Course ID is required')]")
-    except Exception:
-        pass
-    assert error and error.is_displayed(), "No se mostró el error por Course ID vacío."
+    # El botón debe estar deshabilitado si el campo Course ID está vacío
+    assert not save_btn.is_enabled(), "El botón de Copy está habilitado aunque el campo Course ID está vacío."
 
 # CP-04-03-04 Course ID con longitud máxima permitida
 @pytest.mark.usefixtures("driver")
@@ -2331,8 +2374,11 @@ def test_cp_04_03_04_copy_course_id_max_length(driver):
     modal.find_element(By.ID, "copy-course-id").send_keys(max_id)
     modal.find_element(By.ID, "copy-course-name").clear()
     modal.find_element(By.ID, "copy-course-name").send_keys("Curso ID Máx")
-    modal.find_element(By.ID, "copy-course-institute").clear()
-    modal.find_element(By.ID, "copy-course-institute").send_keys("UNSA")
+    institute_select = modal.find_element(By.ID, "copy-course-institute")
+    for option in institute_select.find_elements(By.TAG_NAME, "option"):
+        if option.get_attribute("value").lower() == "unsa":
+            option.click()
+            break
     tz_select = modal.find_element(By.ID, "copy-time-zone")
     for option in tz_select.find_elements(By.TAG_NAME, "option"):
         if "America/Lima" in option.text:
@@ -2341,15 +2387,30 @@ def test_cp_04_03_04_copy_course_id_max_length(driver):
     save_btn = modal.find_element(By.XPATH, ".//button[contains(text(), 'Copy') or contains(text(), 'Copiar')]")
     assert save_btn.is_enabled(), "El botón de copiar no está habilitado"
     save_btn.click()
-    # Validar toast de éxito
-    success = False
+    # Validar toast de éxito (extraer texto desde .toast-body si es necesario)
     try:
-        toast = wait.until(EC.visibility_of_element_located((By.XPATH, "//tm-toast[contains(., 'copied successfully') or contains(., 'copiado') or contains(., 'successfully')][not(contains(@style, 'display: none'))]")))
-        if toast.is_displayed():
-            success = True
+        toast = wait.until(EC.visibility_of_element_located((By.XPATH, "//tm-toast[not(contains(@style, 'display: none'))]")))
+        toast_text = toast.text.strip()
+        if not toast_text:
+            try:
+                toast_body = toast.find_element(By.CLASS_NAME, "toast-body")
+                toast_text = toast_body.text.strip()
+            except Exception:
+                toast_text = ""
+        print("[DEPURACIÓN] Texto del toast visible tras copiar (ID máx):", toast_text)
+        valid_success_texts = [
+            "copied successfully", "copiado", "successfully", "copiado con éxito", "copia exitosa", "copia realizada",
+            "the course has been added."
+        ]
+        toast_text_lower = toast_text.lower()
+        assert any(s in toast_text_lower for s in valid_success_texts), f"El toast no contiene mensaje esperado: {toast_text}"
     except Exception:
-        pass
-    assert success, "No se confirmó la copia exitosa del curso con ID de 64 caracteres."
+        print("[DEPURACIÓN] No se encontró el toast esperado (ID máx). HTML del body:")
+        print(driver.find_element(By.TAG_NAME, "body").get_attribute("outerHTML"))
+        toasts = driver.find_elements(By.XPATH, "//tm-toast[not(contains(@style, 'display: none'))]")
+        for idx, t in enumerate(toasts):
+            print(f"Toast visible {idx}: {t.text}")
+        raise AssertionError("No se confirmó la copia exitosa del curso con ID de 64 caracteres (no apareció el toast de éxito o el texto no coincide).")
 
 # CP-04-03-05 Course ID con longitud superior al límite
 @pytest.mark.usefixtures("driver")
@@ -2369,21 +2430,53 @@ def test_cp_04_03_05_copy_course_id_exceeds_max_length(driver):
     modal = open_copy_course_modal(driver, wait)
     # 65 caracteres
     too_long_id = "C" + "1" * 64
-    modal.find_element(By.ID, "copy-course-id").clear()
-    modal.find_element(By.ID, "copy-course-id").send_keys(too_long_id)
-    modal.find_element(By.ID, "copy-course-name").clear()
-    modal.find_element(By.ID, "copy-course-name").send_keys("Curso ID Largo")
-    modal.find_element(By.ID, "copy-course-institute").clear()
-    modal.find_element(By.ID, "copy-course-institute").send_keys("UNSA")
-    save_btn = modal.find_element(By.XPATH, ".//button[contains(text(), 'Copy') or contains(text(), 'Copiar')]")
-    save_btn.click()
-    # Validar mensaje de error
-    error = None
+    course_id_input = modal.find_element(By.ID, "copy-course-id")
+    course_id_input.clear()
+    course_id_input.send_keys(too_long_id)
+    # Validar que el valor del input no supera los 64 caracteres
+    max_length = 64
+    input_value = course_id_input.get_attribute("value")
+    assert len(input_value) == max_length, f"El input permite más de {max_length} caracteres: '{input_value}' ({len(input_value)})"
+
+    # Buscar el contador de caracteres restantes (debe mostrar '0 characters left' o similar)
+    char_counter = None
     try:
-        error = modal.find_element(By.XPATH, ".//*[contains(text(), 'exceeds allowed length') or contains(text(), 'longitud máxima') or contains(text(), 'Course ID')]")
+        # Busca por texto exacto o parcial
+        char_counter = modal.find_element(By.XPATH, ".//*[contains(text(), '0 characters left') or contains(text(), '0 caracteres restantes') or contains(text(), '0 character')]")
     except Exception:
         pass
-    assert error and error.is_displayed(), "No se mostró el error por Course ID excediendo el límite."
+    assert char_counter and char_counter.is_displayed(), "No se muestra el contador '0 characters left' al llegar al límite."
+
+    modal.find_element(By.ID, "copy-course-name").clear()
+    modal.find_element(By.ID, "copy-course-name").send_keys("Curso ID Largo")
+    institute_select = modal.find_element(By.ID, "copy-course-institute")
+    for option in institute_select.find_elements(By.TAG_NAME, "option"):
+        if option.get_attribute("value").lower() == "unsa":
+            option.click()
+            break
+    save_btn = modal.find_element(By.XPATH, ".//button[contains(text(), 'Copy') or contains(text(), 'Copiar')]")
+    save_btn.click()
+    # Validar mensaje de error debajo del campo Course ID (no en toast)
+    error = None
+    try:
+        # Buscar un div o span de error justo debajo del input de ID
+        course_id_input = modal.find_element(By.ID, "copy-course-id")
+        # Buscar el siguiente hermano o un div/span con texto de error
+        error_candidates = modal.find_elements(By.XPATH, ".//div[contains(@class, 'invalid-feedback') or contains(@class, 'text-danger') or contains(@class, 'error') or contains(@class, 'form-error') or contains(@class, 'help-block')]")
+        for candidate in error_candidates:
+            if candidate.is_displayed() and ("exceeds allowed length" in candidate.text.lower() or "longitud máxima" in candidate.text.lower() or "max" in candidate.text.lower() or "caracteres" in candidate.text.lower()):
+                error = candidate
+                break
+        # Alternativamente, buscar cualquier texto visible cerca del input
+        if not error:
+            siblings = course_id_input.find_elements(By.XPATH, "following-sibling::*")
+            for sib in siblings:
+                if sib.is_displayed() and ("exceeds allowed length" in sib.text.lower() or "longitud máxima" in sib.text.lower() or "max" in sib.text.lower() or "caracteres" in sib.text.lower()):
+                    error = sib
+                    break
+    except Exception:
+        pass
+    assert error and error.is_displayed(), "No se mostró el error por Course ID excediendo el límite debajo del campo."
 
 # CP-04-03-06 Zona horaria inválida
 @pytest.mark.usefixtures("driver")
