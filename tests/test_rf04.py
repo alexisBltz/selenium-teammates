@@ -2539,16 +2539,21 @@ def test_cp_04_03_07_copy_course_empty_name(driver):
     modal.find_element(By.ID, "copy-course-id").clear()
     modal.find_element(By.ID, "copy-course-id").send_keys("CS101-NONAME")
     modal.find_element(By.ID, "copy-course-name").clear()
-    modal.find_element(By.ID, "copy-course-institute").clear()
-    modal.find_element(By.ID, "copy-course-institute").send_keys("UNSA")
+    # Manejar campo instituto como input o select
+    institute_elem = modal.find_element(By.ID, "copy-course-institute")
+    institute_tag = institute_elem.tag_name.lower()
+    if institute_tag == "input":
+        institute_elem.clear()
+        institute_elem.send_keys("UNSA")
+    elif institute_tag == "select":
+        for option in institute_elem.find_elements(By.TAG_NAME, "option"):
+            if option.get_attribute("value").lower() == "unsa":
+                option.click()
+                break
+    else:
+        institute_elem.send_keys("UNSA")
     save_btn = modal.find_element(By.XPATH, ".//button[contains(text(), 'Copy') or contains(text(), 'Copiar')]")
-    save_btn.click()
-    # Validar mensaje de error
-    error = None
-    try:
-        error = modal.find_element(By.XPATH, ".//*[contains(text(), 'Course Name is required') or contains(text(), 'required') or contains(text(), 'obligatorio')]")
-    except Exception:
-        pass
-    assert error and error.is_displayed(), "No se mostró el error por nombre de curso vacío."
+    # El botón debe estar deshabilitado si el nombre está vacío
+    assert not save_btn.is_enabled(), "El botón de Copy está habilitado aunque el campo Course Name está vacío."
 
 
