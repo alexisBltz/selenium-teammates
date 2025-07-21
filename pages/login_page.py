@@ -53,10 +53,13 @@ class LoginPage:
 
     # CP-02-01: Verifica si el login fue exitoso
     def is_logged_in(self, user_type="student"):
-        # Verifica si el login fue exitoso buscando el módulo o el texto correspondiente
         if user_type == "instructor":
-            if self.driver.find_elements(By.ID, "instructor-module"):
-                return True
+            try:
+                to_instructor_link = self.driver.find_element(By.XPATH, "//a[contains(text(), 'To instructor pages')]")
+                if to_instructor_link.is_displayed():
+                    return True
+            except Exception:
+                pass
             try:
                 home_element = self.driver.find_element(By.XPATH, "//*[contains(text(), 'Home')]")
                 return home_element.is_displayed()
