@@ -24,7 +24,10 @@ def test_cp_07_01_recover_links_valid_email_valid_captcha_recent_sessions(driver
         El sistema confirma en pantalla y envía al correo los enlaces activos (últimos 90 días)
     """
 
+    driver.get("https://teammatesv4.appspot.com/web/front/help/session-links-recovery")
 
+    
+    
 # CP-07-02
 def test_cp_07_02_recover_links_valid_email_valid_captcha_no_recent_sessions(driver):
     """
@@ -45,6 +48,7 @@ def test_cp_07_02_recover_links_valid_email_valid_captcha_no_recent_sessions(dri
         El sistema confirma en pantalla y envía correo indicando que no hay sesiones recientes
     """
 
+    driver.get("https://teammatesv4.appspot.com/web/front/help/session-links-recovery")
 
 # CP-07-03
 def test_cp_07_03_recover_links_valid_email_invalid_captcha(driver):
